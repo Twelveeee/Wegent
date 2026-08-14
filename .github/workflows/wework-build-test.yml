@@ -1,0 +1,84 @@
+name: Wework Windows Test Build
+
+# Standalone test workflow: build the WeWork Windows NSIS installer from the
+# latest pushed code and upload it as a workflow artifact.
+# Trigger manually: Actions -> "Wework Windows Test Build" -> Run workflow.
+# Does not touch the official release pipeline (wework-app.yml).
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: 'Backend base URL baked into the app (empty = default localhost:8000)'
+        required: false
+        default: 'http://192.168.102.110:8000'
+      bundles:
+        description: 'Tauri bundle targets'
+        required: false
+        default: 'nsis'
+
+concurrency:
+  group: wework-windows-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows x64 installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build local executor sidecar
+        shell: pwsh
+        working-directory: executor
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:RUSTFLAGS = '-C target-feature=+crt-static'
+          cargo build --release --locked --target x86_64-pc-windows-msvc
+          New-Item -ItemType Directory -Force ../wework/src-tauri/binaries | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/wegent-executor.exe ../wework/src-tauri/binaries/wegent-executor-x86_64-pc-windows-msvc.exe
+
+      - name: Prepare bundled sidecars
+        working-directory: wework
+        env:
+          WEWORK_CODEX_TARGET: x86_64-pc-windows-msvc
+          WEWORK_DWS_TARGET: x86_64-pc-windows-msvc
+        run: |
+          pnpm run prepare:codex --materialize
+          pnpm run prepare:dws
+
+      - name: Build Wework installer
+        working-directory: wework
+        env:
+          VITE_WEGENT_BACKEND_URL: ${{ inputs.backend_url }}
+          VITE_WEWORK_RUNTIME_MODE: backend
+        run: |
+          pnpm exec tauri build --target x86_64-pc-windows-msvc --bundles ${{ inputs.bundles }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wework-windows-installer
+          path: wework/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
