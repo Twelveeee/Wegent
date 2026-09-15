@@ -3,6 +3,18 @@ name: Wework App
 on:
   workflow_dispatch:
     inputs:
+      build_profile:
+        description: "Release build or an ad-hoc signed macOS ARM test artifact"
+        type: choice
+        options:
+          - release
+          - macos-arm64-test
+        required: true
+        default: release
+      brand_config_json:
+        description: "Optional brand configuration JSON (no credentials)"
+        type: string
+        required: false
       channel:
         description: "Release channel. Stable releases also advance the Beta channel."
         type: choice
@@ -41,10 +53,13 @@ jobs:
       publish_release: ${{ steps.version.outputs.publish_release }}
       release_kind: ${{ steps.plan.outputs.kind }}
       componentized_host_update: ${{ steps.current-channel.outputs.componentized_host_update }}
+      build_matrix: ${{ steps.profile.outputs.build_matrix }}
+      test_build: ${{ steps.profile.outputs.test_build }}
 
     steps:
       - name: Create release app token
         id: release-app-token
+        if: inputs.build_profile != 'macos-arm64-test'
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_APP_ID || secrets.RELEASE_APP_ID || vars.RELEASE_APP_CLIENT_ID || secrets.RELEASE_APP_CLIENT_ID }}
@@ -55,7 +70,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.release-app-token.outputs.token }}
+          token: ${{ inputs.build_profile == 'macos-arm64-test' && github.token || steps.release-app-token.outputs.token }}
+
+      - name: Resolve desktop build profile
+        id: profile
+        env:
+          INPUT_BUILD_PROFILE: ${{ inputs.build_profile || 'release' }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release == true }}
+        run: node wework/scripts/desktop-build-profile.mjs
 
       - name: Resolve Wework release version
         id: version
@@ -177,44 +199,22 @@ jobs:
     if: needs.prepare-release.outputs.release_kind != 'none'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      WEWORK_BUILD_PROFILE: ${{ inputs.build_profile || 'release' }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: macOS arm64
-            runner: macos-14
-            platform: macos
-            arch: arm64
-            node_arch: arm64
-            cargo_target: aarch64-apple-darwin
-            codex_target: aarch64-apple-darwin
-          - name: macOS x64
-            runner: macos-14
-            platform: macos
-            arch: x64
-            node_arch: x64
-            cargo_target: x86_64-apple-darwin
-            codex_target: x86_64-apple-darwin
-          - name: Windows x64
-            runner: windows-latest
-            platform: windows
-            arch: x64
-            node_arch: x64
-            cargo_target: x86_64-pc-windows-msvc
-            codex_target: x86_64-pc-windows-msvc
-          - name: Linux x64
-            runner: ubuntu-latest
-            platform: linux
-            arch: x64
-            node_arch: x64
-            cargo_target: x86_64-unknown-linux-gnu
-            codex_target: x86_64-unknown-linux-gnu
+      matrix: ${{ fromJSON(needs.prepare-release.outputs.build_matrix) }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
+
+      - name: Prepare optional brand configuration
+        env:
+          INPUT_BRAND_CONFIG_JSON: ${{ inputs.brand_config_json }}
+        run: node wework/scripts/prepare-desktop-brand-config.mjs
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
@@ -264,11 +264,32 @@ jobs:
       - name: Install Wework Electron dependencies
         run: pnpm --dir wework/electron install --frozen-lockfile
 
+      - name: Verify macOS ARM test build sources
+        if: needs.prepare-release.outputs.test_build == 'true'
+        run: |
+          pnpm --filter wework typecheck
+          pnpm --filter wework test \
+            src/components/layout/DesktopSidebar.test.tsx \
+            src/components/layout/SidebarSortableList.test.tsx \
+            src/components/layout/SidebarTaskTitle.test.tsx \
+            src/components/layout/SidebarWorklistsScroll.test.tsx \
+            src/components/layout/sidebarTitleMotion.test.ts \
+            src/test/bundled-plugin-resources.test.ts \
+            scripts/desktop-build-profile.test.mjs \
+            scripts/desktop-resource-migration.test.mjs \
+            scripts/prepare-desktop-brand-config.test.mjs \
+            scripts/prepare-desktop-release-assets.test.mjs \
+            electron/src/build-identity.test.ts \
+            electron/scripts/build-release.test.mjs \
+            electron/scripts/prepare-signed-components.test.mjs
+          pnpm --filter wework test src/components/layout/DesktopWorkbenchLayout.test.tsx \
+            -t 'keeps projects and chats in the scrollable sidebar region above settings'
+
       - name: Synchronize desktop build version
         run: node wework/scripts/sync-desktop-release-version.mjs "${{ needs.prepare-release.outputs.version }}"
 
       - name: Prepare Apple signing keychain
-        if: matrix.platform == 'macos'
+        if: matrix.platform == 'macos' && needs.prepare-release.outputs.test_build != 'true'
         shell: bash
         env:
           MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
@@ -304,13 +325,15 @@ jobs:
             echo "Developer ID Application identity not found" >&2
             exit 1
           }
-          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
-          # Reuse one keychain so parallel electron-builder processes do not race during cleanup.
-          echo "CSC_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
-          echo "MACOS_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+          {
+            echo "APPLE_SIGNING_IDENTITY=$identity"
+            # Reuse one keychain so parallel electron-builder processes do not race during cleanup.
+            echo "CSC_KEYCHAIN=$keychain_path"
+            echo "MACOS_KEYCHAIN_PATH=$keychain_path"
+          } >> "$GITHUB_ENV"
 
       - name: Prepare Apple notarization key
-        if: matrix.platform == 'macos'
+        if: matrix.platform == 'macos' && needs.prepare-release.outputs.test_build != 'true'
         shell: bash
         env:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
@@ -323,7 +346,7 @@ jobs:
           echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
 
       - name: Restore immutable signed components
-        if: matrix.platform == 'macos'
+        if: matrix.platform == 'macos' && needs.prepare-release.outputs.test_build != 'true'
         uses: actions/cache@v4
         with:
           path: wework/electron/.cache/signed-components
@@ -331,19 +354,20 @@ jobs:
           restore-keys: |
             signed-components-v1-${{ matrix.arch }}-${{ env.APPLE_SIGNING_IDENTITY }}-
 
-      - name: Build signed Electron release
+      - name: Build Electron package
         env:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CARGO_BUILD_TARGET: ${{ matrix.cargo_target }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ needs.prepare-release.outputs.test_build == 'true' && 'false' || 'true' }}
           VITE_WEGENT_BACKEND_URL: https://api.wecode.ai
           VITE_WEWORK_RELEASE_CHANNEL: ${{ needs.prepare-release.outputs.channel }}
           VITE_WEWORK_RUNTIME_MODE: local-first
           WEWORK_CODEX_TARGET: ${{ matrix.codex_target }}
           WEWORK_DWS_TARGET: ${{ matrix.cargo_target }}
           WEWORK_ELECTRON_DEPENDENCIES_READY: "true"
-          WEWORK_CUSTOM_MACOS_NOTARIZATION: ${{ matrix.platform == 'macos' && 'true' || '' }}
+          WEWORK_CUSTOM_MACOS_NOTARIZATION: ${{ matrix.platform == 'macos' && needs.prepare-release.outputs.test_build != 'true' && 'true' || '' }}
           WEWORK_RELEASE_ARCH: ${{ matrix.arch }}
           WEWORK_RELEASE_PLATFORM: ${{ matrix.platform }}
           WEWORK_ONLINE_UPDATE_INCLUDE_COMPONENTS: ${{ needs.prepare-release.outputs.componentized_host_update != 'true' }}
@@ -353,7 +377,7 @@ jobs:
         run: pnpm --filter wework build:release
 
       - name: Verify formal release package
-        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64' && needs.prepare-release.outputs.test_build != 'true'
         env:
           CODEX_BIN: ${{ github.workspace }}/wework/resources/binaries/codex/${{ matrix.codex_target }}/vendor/${{ matrix.codex_target }}/bin/codex
           WEWORK_E2E_APP_BIN: ${{ github.workspace }}/wework/electron/release-installer/mac-arm64/WeWork.app/Contents/MacOS/WeWork
@@ -367,11 +391,11 @@ jobs:
           pnpm --filter wework e2e:desktop -- --segment app-update-baseline
 
       - name: Prune formal release verification diagnostics
-        if: failure() && matrix.platform == 'macos' && matrix.arch == 'arm64'
+        if: failure() && matrix.platform == 'macos' && matrix.arch == 'arm64' && needs.prepare-release.outputs.test_build != 'true'
         run: .github/scripts/prune-wework-desktop-e2e-diagnostics.sh
 
       - name: Upload formal release verification diagnostics
-        if: failure() && matrix.platform == 'macos' && matrix.arch == 'arm64'
+        if: failure() && matrix.platform == 'macos' && matrix.arch == 'arm64' && needs.prepare-release.outputs.test_build != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:

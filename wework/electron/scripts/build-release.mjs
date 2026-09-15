@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { wrapWindowsScriptCommand } from '../../scripts/child-process-command.mjs'
+import { resolveDesktopBuildProfile } from '../../scripts/desktop-build-profile.mjs'
 
 const electronRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -15,6 +16,10 @@ if (isMainModule()) {
 export async function buildRelease(environment = process.env, runBuild = run) {
   const platform = environment.WEWORK_RELEASE_PLATFORM?.trim() || process.platform
   const arch = environment.WEWORK_RELEASE_ARCH?.trim() || process.arch
+  const { testBuild } = resolveDesktopBuildProfile(environment.WEWORK_BUILD_PROFILE)
+  if (testBuild && (!['darwin', 'macos'].includes(platform) || arch !== 'arm64')) {
+    throw new Error('macos-arm64-test requires a macOS arm64 build')
+  }
   const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
   const platformFlag = {
     darwin: '--mac',
@@ -40,6 +45,7 @@ export async function buildRelease(environment = process.env, runBuild = run) {
     `--${arch}`,
     '--publish',
     'never',
+    ...(testBuild ? ['--config.mac.identity=-', '--config.mac.notarize=false'] : []),
   ]
   const builds = releaseBuildEnvironments(environment).map(overrides =>
     runBuild(pnpmCommand, builderArgs, electronRoot, overrides)
@@ -48,6 +54,7 @@ export async function buildRelease(environment = process.env, runBuild = run) {
 }
 
 export function releaseBuildEnvironments(environment = process.env) {
+  if (resolveDesktopBuildProfile(environment.WEWORK_BUILD_PROFILE).testBuild) return [{}]
   const buildOnlineUpdate =
     environment.WEWORK_ONLINE_UPDATE_INCLUDE_COMPONENTS?.trim().toLowerCase() !== 'true'
   return [{}, ...(buildOnlineUpdate ? [{ WEWORK_ONLINE_UPDATE_BUILD: 'true' }] : [])]

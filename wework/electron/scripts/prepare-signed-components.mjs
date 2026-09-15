@@ -17,7 +17,16 @@ const SIGNED_COMPONENT_CODESIGN_FLAGS = [
 ]
 
 export function signedComponentCodesignArguments(identity, file) {
-  return ['--force', '--sign', identity, ...SIGNED_COMPONENT_CODESIGN_FLAGS, file]
+  const flags = SIGNED_COMPONENT_CODESIGN_FLAGS.filter(
+    flag => identity !== '-' || flag !== '--timestamp'
+  )
+  return ['--force', '--sign', identity, ...flags, file]
+}
+
+export function resolveComponentSigningIdentity(environment) {
+  return environment.WEWORK_BUILD_PROFILE === 'macos-arm64-test'
+    ? '-'
+    : environment.APPLE_SIGNING_IDENTITY
 }
 
 export async function reuseSignedComponent({ source, cacheRoot, identity, policy, sign, verify }) {
@@ -59,8 +68,8 @@ export async function reuseSignedComponent({ source, cacheRoot, identity, policy
 }
 
 export async function prepareSignedComponents(environment = process.env) {
-  if (process.platform !== 'darwin' || !environment.APPLE_SIGNING_IDENTITY) return
-  const identity = environment.APPLE_SIGNING_IDENTITY
+  const identity = resolveComponentSigningIdentity(environment)
+  if (process.platform !== 'darwin' || !identity) return
   const resources = join(electronRoot, 'resources')
   const manifestPath = join(resources, 'components.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))

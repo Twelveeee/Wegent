@@ -111,12 +111,27 @@ test.each([
 test.each([
   {
     name: 'unsigned',
+    buildProfile: 'release',
     signingIdentity: '',
     signIgnore: ['/Contents/Resources/wework-core-plugins/'],
   },
   {
     name: 'signed',
+    buildProfile: 'release',
     signingIdentity: 'test-signing-identity',
+    signIgnore: [
+      '/Contents/Resources/harness-runtime/',
+      '/Contents/Resources/bin/',
+      '/Contents/Resources/codex/',
+      '/Contents/Resources/wework-core-plugins/',
+      '/Contents/Resources/wework-app-static/',
+      '/Contents/Resources/bundled-plugins/',
+    ],
+  },
+  {
+    name: 'ad-hoc ARM test',
+    buildProfile: 'macos-arm64-test',
+    signingIdentity: '',
     signIgnore: [
       '/Contents/Resources/harness-runtime/',
       '/Contents/Resources/bin/',
@@ -128,7 +143,7 @@ test.each([
   },
 ])(
   'packages product locales and preserves component signatures for $name builds',
-  ({ signingIdentity, signIgnore }) => {
+  ({ buildProfile, signingIdentity, signIgnore }) => {
     const builderConfig = JSON.parse(
       execFileSync(
         process.execPath,
@@ -138,6 +153,7 @@ test.each([
           env: {
             ...process.env,
             WEWORK_BRAND_CONFIG: '',
+            WEWORK_BUILD_PROFILE: buildProfile,
             APPLE_SIGNING_IDENTITY: signingIdentity,
           },
         }
