@@ -16,7 +16,7 @@ on:
         type: string
         required: false
       channel:
-        description: "Release channel. Stable releases also advance the Beta channel."
+        description: "Release channel; test builds follow their version. Stable releases also advance Beta."
         type: choice
         options:
           - stable
@@ -24,7 +24,7 @@ on:
         required: true
         default: stable
       version:
-        description: "Optional stable version override, for example 1.2.3"
+        description: "Optional version override, for example 1.2.3. Test builds default to the checked-in version."
         type: string
         required: false
       publish_release:
@@ -82,6 +82,7 @@ jobs:
       - name: Resolve Wework release version
         id: version
         env:
+          WEWORK_BUILD_PROFILE: ${{ inputs.build_profile || 'release' }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           INPUT_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
           PUBLISH_RELEASE: ${{ github.event.inputs.publish_release == 'true' }}
@@ -276,6 +277,7 @@ jobs:
             src/components/layout/sidebarTitleMotion.test.ts \
             src/test/bundled-plugin-resources.test.ts \
             scripts/desktop-build-profile.test.mjs \
+            scripts/resolve-release-version.test.mjs \
             scripts/desktop-resource-migration.test.mjs \
             scripts/prepare-desktop-brand-config.test.mjs \
             scripts/prepare-desktop-release-assets.test.mjs \

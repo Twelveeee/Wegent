@@ -1,7 +1,64 @@
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { resolveReleaseVersion } from './resolve-release-version.mjs'
 
 describe('resolveReleaseVersion', () => {
+  test.each(['0.4.6', '0.4.6-beta.4'])(
+    'test builds use checked-in version %s without depending on fork release tags',
+    sourceVersion => {
+      for (const tags of [[], ['wework-v99.0.0']]) {
+        expect(
+          resolveReleaseVersion({
+            tags,
+            sourceVersion,
+            buildProfile: 'macos-arm64-test',
+            githubRef: 'refs/tags/wework-v1.0.0',
+            githubRefName: 'wework-v1.0.0',
+          })
+        ).toEqual({
+          version: sourceVersion,
+          channel: sourceVersion.includes('-beta.') ? 'beta' : 'stable',
+          releaseTag: `wework-v${sourceVersion}`,
+          prerelease: sourceVersion.includes('-beta.'),
+          publishRelease: false,
+        })
+      }
+    }
+  )
+
+  test('test builds accept an explicit version and reject publication or a missing version', () => {
+    const options = { tags: [], buildProfile: 'macos-arm64-test' }
+    expect(resolveReleaseVersion({ ...options, inputVersion: 'v1.2.3-beta.1' }).version).toBe(
+      '1.2.3-beta.1'
+    )
+    expect(() => resolveReleaseVersion(options)).toThrow('Invalid stable Wework version')
+    expect(() => resolveReleaseVersion({ ...options, publishRelease: true })).toThrow(
+      'cannot publish'
+    )
+  })
+
+  test('the test-build CLI reads its version from the checked-in package', () => {
+    const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+    const output = execFileSync(
+      process.execPath,
+      [resolve(process.cwd(), 'scripts/resolve-release-version.mjs')],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          WEWORK_BUILD_PROFILE: 'macos-arm64-test',
+          INPUT_VERSION: '',
+          PUBLISH_RELEASE: 'false',
+          GITHUB_OUTPUT: '',
+        },
+      }
+    )
+    expect(output).toContain(`value=${manifest.version}\n`)
+    expect(output).toContain('publish_release=false\n')
+  })
+
   test('starts the next patch Beta without a version input', () => {
     expect(
       resolveReleaseVersion({
