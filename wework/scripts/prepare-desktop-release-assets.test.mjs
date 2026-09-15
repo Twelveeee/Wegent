@@ -28,35 +28,36 @@ async function createFixture(context) {
   return root
 }
 
-test('ARM test assets contain only installers and matching SHA-256 checksums', async context => {
-  const root = await createFixture(context)
-  const installers = ['WeWork_1.2.3_macos_arm64.dmg', 'WeWork_1.2.3_macos_arm64.zip']
-  for (const name of [...installers, `${installers[1]}.blockmap`]) {
-    await writeFile(join(root, 'electron/release-installer', name), `fixture:${name}`)
-  }
-  const output = join(root, 'artifacts')
-
-  await execute(
-    process.execPath,
-    [join(root, 'scripts/prepare-desktop-release-assets.mjs'), 'macos', 'arm64', '1.2.3', output],
-    {
-      env: {
-        ...process.env,
-        WEWORK_BUILD_PROFILE: 'macos-arm64-test',
-        WEWORK_USE_COMPONENTIZED_HOST_UPDATE: 'true',
-      },
+for (const includeUnusedZip of [false, true]) {
+  test(`ARM test assets contain only a DMG and its checksum ${includeUnusedZip ? 'when an unused ZIP exists' : 'without building a ZIP'}`, async context => {
+    const root = await createFixture(context)
+    const dmg = 'WeWork_1.2.3_macos_arm64.dmg'
+    const unusedZip = 'WeWork_1.2.3_macos_arm64.zip'
+    for (const name of [dmg, ...(includeUnusedZip ? [unusedZip, `${unusedZip}.blockmap`] : [])]) {
+      await writeFile(join(root, 'electron/release-installer', name), `fixture:${name}`)
     }
-  )
+    const output = join(root, 'artifacts')
 
-  assert.deepEqual((await readdir(output)).sort(), ['SHA256SUMS.txt', ...installers])
-  const checksums = await readFile(join(output, 'SHA256SUMS.txt'), 'utf8')
-  for (const name of installers) {
-    const contents = await readFile(join(output, name))
-    assert.equal(contents.toString(), `fixture:${name}`)
+    await execute(
+      process.execPath,
+      [join(root, 'scripts/prepare-desktop-release-assets.mjs'), 'macos', 'arm64', '1.2.3', output],
+      {
+        env: {
+          ...process.env,
+          WEWORK_BUILD_PROFILE: 'macos-arm64-test',
+          WEWORK_USE_COMPONENTIZED_HOST_UPDATE: 'true',
+        },
+      }
+    )
+
+    assert.deepEqual((await readdir(output)).sort(), ['SHA256SUMS.txt', dmg])
+    const checksums = await readFile(join(output, 'SHA256SUMS.txt'), 'utf8')
+    const contents = await readFile(join(output, dmg))
+    assert.equal(contents.toString(), `fixture:${dmg}`)
     const hash = createHash('sha256').update(contents).digest('hex')
-    assert.ok(checksums.includes(`${hash}  ${name}\n`))
-  }
-})
+    assert.equal(checksums, `${hash}  ${dmg}\n`)
+  })
+}
 
 test('ARM test asset preparation rejects other architectures before changing output', async context => {
   const root = await createFixture(context)

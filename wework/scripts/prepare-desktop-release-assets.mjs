@@ -41,13 +41,13 @@ if (platform === 'macos') {
     installerRoot,
     new RegExp(`^WeWork_${escape(version)}_macos_${arch}\\.dmg$`)
   )
-  const installerZip = await findFile(
-    installerRoot,
-    new RegExp(`^WeWork_${escape(version)}_macos_${arch}\\.zip$`)
-  )
   await cp(dmg, join(output, basename(dmg)))
-  await copyUpdateArtifacts(
-    [
+  if (!testBuild) {
+    const installerZip = await findFile(
+      installerRoot,
+      new RegExp(`^WeWork_${escape(version)}_macos_${arch}\\.zip$`)
+    )
+    await copyUpdateArtifacts([
       installerZip,
       ...(useComponentizedHostUpdate
         ? [
@@ -57,9 +57,8 @@ if (platform === 'macos') {
             ),
           ]
         : []),
-    ],
-    !testBuild
-  )
+    ])
+  }
 } else if (platform === 'windows') {
   const installer = await findFile(
     installerRoot,

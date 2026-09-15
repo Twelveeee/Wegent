@@ -42,6 +42,7 @@ export async function buildRelease(environment = process.env, runBuild = run) {
     '--config',
     'electron-builder.config.cjs',
     platformFlag,
+    ...(testBuild ? ['dmg'] : []),
     `--${arch}`,
     '--publish',
     'never',

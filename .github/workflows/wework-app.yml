@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_profile:
-        description: "Release build or an ad-hoc signed macOS ARM test artifact"
+        description: "Release build or an ad-hoc signed macOS ARM test DMG"
         type: choice
         options:
           - release

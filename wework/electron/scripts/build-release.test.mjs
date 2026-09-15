@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from 'vitest'
 import { buildRelease, releaseBuildEnvironments } from './build-release.mjs'
 
 describe('desktop release builds', () => {
-  test('builds only an ad-hoc signed ARM installer in test mode', async () => {
+  test('builds only an ad-hoc signed ARM DMG in test mode', async () => {
     const runBuild = vi.fn().mockResolvedValue(undefined)
     await buildRelease(
       {
@@ -15,16 +15,19 @@ describe('desktop release builds', () => {
       runBuild
     )
     expect(runBuild).toHaveBeenCalledTimes(1)
-    expect(runBuild.mock.calls[0][1]).toEqual(
-      expect.arrayContaining([
-        '--mac',
-        '--arm64',
-        '--publish',
-        'never',
-        '--config.mac.identity=-',
-        '--config.mac.notarize=false',
-      ])
-    )
+    expect(runBuild.mock.calls[0][1]).toEqual([
+      'exec',
+      'electron-builder',
+      '--config',
+      'electron-builder.config.cjs',
+      '--mac',
+      'dmg',
+      '--arm64',
+      '--publish',
+      'never',
+      '--config.mac.identity=-',
+      '--config.mac.notarize=false',
+    ])
     expect(runBuild.mock.calls[0][3]).toEqual({})
   })
 
@@ -77,6 +80,7 @@ describe('desktop release builds', () => {
       { WEWORK_ONLINE_UPDATE_BUILD: 'true' },
     ])
     expect(runBuild.mock.calls[0][1]).not.toContain('--config.mac.identity=-')
+    expect(runBuild.mock.calls[0][1]).not.toContain('dmg')
     releaseFirstBuild()
     await build
   })
