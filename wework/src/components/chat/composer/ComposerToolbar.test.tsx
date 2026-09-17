@@ -168,7 +168,7 @@ describe('ComposerToolbar', () => {
     expect(permission.compareDocumentPosition(contextUsage)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
-  it('wraps whole toolbar groups and lets the active mode pill shrink in narrow composers', () => {
+  it('reserves feature widths and lets model actions use the remaining toolbar space', () => {
     render(
       <ComposerToolbar
         canSend={false}
@@ -191,8 +191,9 @@ describe('ComposerToolbar', () => {
     const goalPill = screen.getByTestId('goal-draft-pill')
 
     expect(toolbar).toHaveClass('flex-wrap', 'gap-x-2', 'gap-y-1')
-    expect(features).toHaveClass('flex-auto', 'min-w-0', 'flex-wrap', 'gap-x-2', 'gap-y-1')
-    expect(actions).toHaveClass('ml-auto', 'shrink-0')
+    expect(features).toHaveClass('min-w-0', 'max-w-full', 'flex-wrap', 'gap-x-2', 'gap-y-1')
+    expect(features).not.toHaveClass('flex-auto')
+    expect(actions).toHaveClass('ml-auto', 'min-w-40', 'flex-1', 'justify-end')
     expect(goalPill).toHaveClass('min-w-8', 'max-w-full', 'shrink', 'overflow-hidden')
     expect(goalPill.querySelector('span')).toHaveClass('min-w-0', 'truncate')
   })
@@ -224,7 +225,39 @@ describe('ComposerToolbar', () => {
     await userEvent.click(screen.getByTestId('send-mode-menu-button'))
 
     const sendAfterTurnOption = screen.getByTestId('send-after-turn-option')
+    const guideCurrentTurnOption = screen.getByTestId('guide-current-turn-option')
     expect(sendAfterTurnOption).toHaveTextContent(modifier)
     expect(sendAfterTurnOption.querySelector('.lucide-corner-down-left')).toBeInTheDocument()
+    expect(guideCurrentTurnOption.querySelector('.lucide-corner-down-left')).not.toBeInTheDocument()
+  })
+
+  it('assigns the configured send shortcut only to the selected follow-up behavior', async () => {
+    vi.mocked(getPlatform).mockReturnValue('mac')
+
+    render(
+      <ComposerToolbar
+        canSend
+        isStreaming
+        sendKey="cmd_enter"
+        followUpBehavior="guide"
+        models={[]}
+        selectedModel={null}
+        selectedModelOptions={{}}
+        isModelSelectionReady
+        onSelectModel={vi.fn()}
+        onSelectModelOption={vi.fn()}
+        onFileSelect={vi.fn()}
+        onQuickPhraseSelect={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    )
+
+    await userEvent.click(screen.getByTestId('send-mode-menu-button'))
+
+    const sendAfterTurnOption = screen.getByTestId('send-after-turn-option')
+    const guideCurrentTurnOption = screen.getByTestId('guide-current-turn-option')
+    expect(sendAfterTurnOption.querySelector('.lucide-corner-down-left')).not.toBeInTheDocument()
+    expect(guideCurrentTurnOption).toHaveTextContent('⌘')
+    expect(guideCurrentTurnOption.querySelector('.lucide-corner-down-left')).toBeInTheDocument()
   })
 })
