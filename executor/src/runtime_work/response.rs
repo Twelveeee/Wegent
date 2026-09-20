@@ -17,6 +17,10 @@ use super::util::{
     string_field, timestamp_ms_field, workspace_group_path, workspace_label, workspace_task_path,
 };
 
+/// Goal execution status set by the executor when a Goal turn stops on user
+/// intervention, such as a Codex `requestUserInput` question or a failed turn.
+pub(super) const GOAL_EXECUTION_NEEDS_ATTENTION: &str = "needsAttention";
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeSupervisorSuggestion {
@@ -207,8 +211,10 @@ impl RuntimeTaskLink {
             .or_else(|| local_link.as_ref().and_then(|link| link.git_info.clone()));
         let local_completed_at = local_link.as_ref().and_then(|link| link.completed_at);
         let local_settled_status = local_link.as_ref().and_then(local_settled_status);
-        let provider_turn_running =
-            codex_thread_has_in_progress_turn_after(thread, local_completed_at);
+        let goal_awaiting_user =
+            local_link.as_ref().is_some_and(goal_execution_awaits_user_attention);
+        let provider_turn_running = !goal_awaiting_user
+            && codex_thread_has_in_progress_turn_after(thread, local_completed_at);
         let running = !local_archived && (execution_running || provider_turn_running);
         let mut status = merged_task_status(thread, running, local_archived);
         let mut thread_status =
@@ -1016,6 +1022,13 @@ pub(super) fn codex_thread_has_in_progress_turn(thread: &Value) -> bool {
     codex_thread_has_in_progress_turn_after(thread, None)
 }
 
+/// A Goal that stopped on user intervention keeps its provider turn open while
+/// Wework waits for an answer, so the provider turn alone must not keep the task
+/// running once the executor asks for attention.
+pub(super) fn goal_execution_awaits_user_attention(link: &RuntimeTaskLink) -> bool {
+    link.goal_execution_status.as_deref() == Some(GOAL_EXECUTION_NEEDS_ATTENTION)
+}
+
 fn codex_thread_has_in_progress_turn_after(
     thread: &Value,
     local_completed_at: Option<i64>,
@@ -1280,6 +1293,53 @@ mod tests {
         assert_eq!(link.status, "running");
         assert!(link.running);
         assert_eq!(link.thread_status, "active");
+        assert_eq!(link.turn_status.as_deref(), Some("inProgress"));
+    }
+
+    #[test]
+    fn goal_needing_attention_stops_an_in_progress_provider_turn_from_running() {
+        let local_link = RuntimeTaskLink {
+            goal_status: Some("active".to_owned()),
+            goal_execution_status: Some(GOAL_EXECUTION_NEEDS_ATTENTION.to_owned()),
+            ..RuntimeTaskLink::default()
+        };
+        let link = RuntimeTaskLink::from_thread_metadata(
+            &json!({
+                "id": "thread-1",
+                "status": {"type": "active", "activeFlags": []},
+                "cwd": "/workspace/project",
+                "turns": [{"id": "turn-1", "status": "inProgress"}],
+            }),
+            Some(local_link),
+            "/workspace/project".to_owned(),
+            false,
+        );
+
+        assert!(!link.running);
+        assert_eq!(link.thread_status, "idle");
+        assert_eq!(link.turn_status.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn actively_running_goal_still_follows_an_in_progress_provider_turn() {
+        let local_link = RuntimeTaskLink {
+            goal_status: Some("active".to_owned()),
+            goal_execution_status: Some("running".to_owned()),
+            ..RuntimeTaskLink::default()
+        };
+        let link = RuntimeTaskLink::from_thread_metadata(
+            &json!({
+                "id": "thread-1",
+                "status": {"type": "active", "activeFlags": []},
+                "cwd": "/workspace/project",
+                "turns": [{"id": "turn-1", "status": "inProgress"}],
+            }),
+            Some(local_link),
+            "/workspace/project".to_owned(),
+            false,
+        );
+
+        assert!(link.running);
         assert_eq!(link.turn_status.as_deref(), Some("inProgress"));
     }
 

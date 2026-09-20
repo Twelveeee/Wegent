@@ -157,8 +157,8 @@ use super::{
     response::{
         archived_conversations_response, codex_thread_has_in_progress_turn,
         codex_thread_in_progress_turn_id, codex_thread_terminal_task_status,
-        runtime_status_is_running, search_result_item, workspace_response, RuntimeTaskLink,
-        RuntimeWorkspaceLink, SearchResultMatch,
+        goal_execution_awaits_user_attention, runtime_status_is_running, search_result_item,
+        workspace_response, RuntimeTaskLink, RuntimeWorkspaceLink, SearchResultMatch,
     },
     runtime_handle_messages::{
         append_completed_transcript_messages, append_runtime_handle_message,

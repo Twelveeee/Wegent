@@ -578,7 +578,11 @@ impl RuntimeWorkRpcHandler {
                 });
             }
         }
-        let running = local_execution_running || codex_thread_has_in_progress_turn(&thread);
+        let goal_awaits_user = local_link
+            .as_ref()
+            .is_some_and(goal_execution_awaits_user_attention);
+        let running = local_execution_running
+            || (!goal_awaits_user && codex_thread_has_in_progress_turn(&thread));
         let message_count = messages.len();
         let turn_navigation = if include_full_content
             || (before_cursor.is_none() && after_cursor.is_none() && page_before_cursor.is_none())
