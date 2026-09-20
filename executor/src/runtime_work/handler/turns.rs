@@ -886,6 +886,13 @@ impl RuntimeWorkRpcHandler {
             self.record_active_codex_transcript_item(local_task_id, &active_turn.turn_id, &message);
             event_request.subtask_id = active_turn.turn_id;
         }
+        if message
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(is_codex_user_input_request_method)
+        {
+            self.mark_awaiting_user_input(local_task_id);
+        }
         event_mapper.map(
             &self.event_tx,
             &self.device_id,
@@ -932,6 +939,9 @@ impl RuntimeWorkRpcHandler {
         restore_permit: Option<tokio::sync::OwnedSemaphorePermit>,
     ) {
         turn.request.extra.remove(RESTORED_TURN_MARKER);
+        // A fresh turn means the provider is active again, so any previously
+        // recorded question is no longer blocking this task.
+        self.clear_awaiting_user_input(&turn.local_task_id);
         let restore_startup = restore_permit.map(RestoreStartupGate::new);
         if is_claude_runtime(&turn.runtime) {
             self.start_claude_turn(turn.local_task_id, turn.request, restore_startup);
@@ -1265,6 +1275,7 @@ impl RuntimeWorkRpcHandler {
             );
             handler.clear_active_codex_turn(&turn_local_task_id, execution_id);
             handler.clear_active_request_user_input(&turn_local_task_id, execution_id);
+            handler.clear_awaiting_user_input(&turn_local_task_id);
             if goal_execution_needs_attention
                 && handler
                     .local_task_link(&turn_local_task_id)

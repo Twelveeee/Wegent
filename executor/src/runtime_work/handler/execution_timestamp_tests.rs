@@ -46,7 +46,7 @@ fn running_projection_preserves_local_start_when_provider_timestamp_lags() {
             }),
             "/tmp/project".to_owned(),
             true,
-        );
+            false);
 
         assert!(link.running);
         assert_eq!(link.completed_at, None);

@@ -194,6 +194,7 @@ impl RuntimeTaskLink {
         local_link: Option<RuntimeTaskLink>,
         workspace_path: String,
         execution_running: bool,
+        awaiting_user_input: bool,
     ) -> Self {
         let thread_id = string_field(thread, "id").unwrap_or_default();
         let local_archived = local_link
@@ -213,7 +214,7 @@ impl RuntimeTaskLink {
         let local_settled_status = local_link.as_ref().and_then(local_settled_status);
         let goal_awaiting_user =
             local_link.as_ref().is_some_and(goal_execution_awaits_user_attention);
-        let provider_turn_running = !goal_awaiting_user
+        let provider_turn_running = !(goal_awaiting_user || awaiting_user_input)
             && codex_thread_has_in_progress_turn_after(thread, local_completed_at);
         let running = !local_archived && (execution_running || provider_turn_running);
         let mut status = merged_task_status(thread, running, local_archived);
@@ -1198,7 +1199,7 @@ mod tests {
             None,
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         let workspaces = workspace_response(vec![task], Vec::new());
 
@@ -1270,7 +1271,7 @@ mod tests {
             None,
             "/workspace/project".to_owned(),
             true,
-        );
+            false);
 
         assert_eq!(link.status, "running");
         assert!(link.running);
@@ -1288,7 +1289,7 @@ mod tests {
             None,
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert_eq!(link.status, "running");
         assert!(link.running);
@@ -1313,7 +1314,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(!link.running);
         assert_eq!(link.thread_status, "idle");
@@ -1337,10 +1338,31 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(link.running);
         assert_eq!(link.turn_status.as_deref(), Some("inProgress"));
+    }
+
+    #[test]
+    fn question_pending_on_user_input_stops_an_in_progress_provider_turn() {
+        let link = RuntimeTaskLink::from_thread_metadata(
+            &json!({
+                "id": "thread-1",
+                "status": {"type": "active", "activeFlags": []},
+                "cwd": "/workspace/project",
+                "turns": [{"id": "turn-1", "status": "inProgress"}],
+            }),
+            None,
+            "/workspace/project".to_owned(),
+            false,
+            true,
+        );
+
+        assert!(!link.running);
+        assert_eq!(link.status, "active");
+        assert_eq!(link.thread_status, "idle");
+        assert_eq!(link.turn_status.as_deref(), Some("completed"));
     }
 
     #[test]
@@ -1358,7 +1380,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             true,
-        );
+            false);
 
         assert_eq!(link.completed_at, Some(1_780_000_000_000));
     }
@@ -1374,7 +1396,7 @@ mod tests {
             None,
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert_eq!(link.completed_at, Some(1_780_000_100_000));
     }
@@ -1399,7 +1421,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert_eq!(link.updated_at, 1_780_000_100_000);
         assert_eq!(link.completed_at, Some(1_780_000_100_000));
@@ -1424,7 +1446,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert_eq!(link.status, "active");
         assert!(!link.running);
@@ -1448,7 +1470,7 @@ mod tests {
                 None,
                 "/workspace/project".to_owned(),
                 false,
-            );
+            false);
 
             assert_eq!(link.status, "active");
             assert!(!link.running);
@@ -1470,7 +1492,7 @@ mod tests {
             None,
             "/workspace/project".to_owned(),
             true,
-        );
+            false);
         link.goal_status = Some("active".to_owned());
         let payload = local_task_json(link);
 
@@ -1508,7 +1530,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(!link.running);
         assert_eq!(link.status, "done");
@@ -1538,7 +1560,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(!link.running);
         assert_eq!(link.status, "done");
@@ -1571,7 +1593,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(link.running);
         assert_eq!(link.status, "running");
@@ -1608,7 +1630,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(!link.running);
         assert_eq!(link.status, "failed");
@@ -1642,7 +1664,7 @@ mod tests {
             Some(local_link),
             "/workspace/project".to_owned(),
             false,
-        );
+            false);
 
         assert!(!link.running);
         assert_eq!(link.status, "cancelled");

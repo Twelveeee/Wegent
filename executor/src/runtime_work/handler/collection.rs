@@ -689,8 +689,16 @@ impl RuntimeWorkRpcHandler {
             .filter(|path| !path.trim().is_empty())
             .or_else(|| string_field(thread, "cwd"))
             .unwrap_or_else(|| "~/.codex".to_owned());
-        let mut link =
-            RuntimeTaskLink::from_thread_metadata(thread, local_link, workspace_path, local_active);
+        let awaiting_user_input = local_link
+            .as_ref()
+            .is_some_and(|link| self.is_awaiting_user_input(&link.local_task_id));
+        let mut link = RuntimeTaskLink::from_thread_metadata(
+            thread,
+            local_link,
+            workspace_path,
+            local_active,
+            awaiting_user_input,
+        );
         if queue_position.is_some() {
             apply_local_execution_state(&mut link, local_active, queue_position);
         }
@@ -1217,6 +1225,30 @@ impl RuntimeWorkRpcHandler {
         {
             active.remove(local_task_id);
         }
+    }
+
+    /// Records that Codex is blocked on a question the user has not answered.
+    /// Such a provider turn stays `inProgress` while Wework shows the question,
+    /// so the open turn alone must not keep the task running.
+    pub(super) fn mark_awaiting_user_input(&self, local_task_id: &str) {
+        self.awaiting_user_input
+            .lock()
+            .expect("awaiting user input set lock should not be poisoned")
+            .insert(local_task_id.to_owned());
+    }
+
+    pub(super) fn clear_awaiting_user_input(&self, local_task_id: &str) {
+        self.awaiting_user_input
+            .lock()
+            .expect("awaiting user input set lock should not be poisoned")
+            .remove(local_task_id);
+    }
+
+    pub(super) fn is_awaiting_user_input(&self, local_task_id: &str) -> bool {
+        self.awaiting_user_input
+            .lock()
+            .expect("awaiting user input set lock should not be poisoned")
+            .contains(local_task_id)
     }
 
     pub(super) fn finish_local_task(

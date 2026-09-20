@@ -581,8 +581,10 @@ impl RuntimeWorkRpcHandler {
         let goal_awaits_user = local_link
             .as_ref()
             .is_some_and(goal_execution_awaits_user_attention);
+        let awaits_user_input = self.is_awaiting_user_input(&local_task_id);
         let running = local_execution_running
-            || (!goal_awaits_user && codex_thread_has_in_progress_turn(&thread));
+            || (!(goal_awaits_user || awaits_user_input)
+                && codex_thread_has_in_progress_turn(&thread));
         let message_count = messages.len();
         let turn_navigation = if include_full_content
             || (before_cursor.is_none() && after_cursor.is_none() && page_before_cursor.is_none())

@@ -188,6 +188,14 @@ use super::{
 };
 
 const CODEX_THREAD_LIST_PAGE_SIZE: usize = 100;
+
+/// Codex requests that pause the provider turn until the user answers.
+fn is_codex_user_input_request_method(method: &str) -> bool {
+    matches!(
+        method,
+        "item/tool/requestUserInput" | "mcpServer/elicitation/request"
+    )
+}
 const CODEX_THREAD_LIST_MAX_ITEMS: usize = 500;
 const CODEX_THREAD_SOURCE_KINDS: &[&str] = &["cli", "vscode", "exec", "appServer"];
 const PENDING_THREAD_EVENT_ROUTE_PREFIX: &str = "pending:";
@@ -571,6 +579,7 @@ pub struct RuntimeWorkRpcHandler {
     active_codex_transcript_items: Arc<Mutex<HashMap<String, ActiveCodexTranscriptItems>>>,
     codex_transcript_navigation_cache: Arc<Mutex<HashMap<String, CachedCodexTranscriptNavigation>>>,
     active_request_user_inputs: Arc<Mutex<HashMap<String, ActiveRequestUserInput>>>,
+    awaiting_user_input: Arc<Mutex<HashSet<String>>>,
     supervisor_evaluating: Arc<Mutex<HashSet<String>>>,
     supervisor_model_configs: Arc<Mutex<HashMap<String, Value>>>,
     thread_event_routing: Arc<Mutex<RuntimeThreadEventRouting>>,
@@ -840,6 +849,7 @@ impl RuntimeWorkRpcHandler {
             active_codex_transcript_items: Arc::new(Mutex::new(HashMap::new())),
             codex_transcript_navigation_cache: Arc::new(Mutex::new(HashMap::new())),
             active_request_user_inputs: Arc::new(Mutex::new(HashMap::new())),
+            awaiting_user_input: Arc::new(Mutex::new(HashSet::new())),
             supervisor_evaluating: Arc::new(Mutex::new(HashSet::new())),
             supervisor_model_configs: Arc::new(Mutex::new(HashMap::new())),
             thread_event_routing: Arc::new(Mutex::new(RuntimeThreadEventRouting::default())),

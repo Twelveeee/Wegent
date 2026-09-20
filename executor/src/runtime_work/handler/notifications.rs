@@ -497,6 +497,13 @@ impl RuntimeWorkRpcHandler {
                     }
                 }
             }
+            if message
+                .get("method")
+                .and_then(Value::as_str)
+                .is_some_and(is_codex_user_input_request_method)
+            {
+                self.mark_awaiting_user_input(&local_task_id);
+            }
             event_mapper
                 .lock()
                 .expect("thread event mapper lock should not be poisoned")

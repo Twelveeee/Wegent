@@ -5394,6 +5394,47 @@ fn task_list_running_state_uses_local_execution_or_provider_turn() {
     let _ = fs::remove_file(index_path);
 }
 
+/// A task whose provider turn stops on a Codex question must not be reported as
+/// running while Wework waits for the answer.
+#[test]
+fn task_blocked_on_user_input_is_not_projected_as_running() {
+    let index_path = temp_runtime_work_index_path("awaiting-user-input");
+    let mut handler = RuntimeWorkRpcHandler::new("device-1", "/bin/false");
+    handler.store = RuntimeWorkStore::new(index_path.clone());
+    handler.upsert_local_task(RuntimeTaskLink {
+        local_task_id: "task-1".to_owned(),
+        thread_id: Some("thread-1".to_owned()),
+        workspace_path: "/tmp/task-workspace".to_owned(),
+        ..RuntimeTaskLink::default()
+    });
+    let provider_thread = json!({
+        "id": "thread-1",
+        "cwd": "/tmp/task-workspace",
+        "status": {"type": "active", "activeFlags": []},
+        "turns": [{"id": "turn-1", "status": "inProgress"}]
+    });
+
+    let running = handler
+        .link_from_thread(&provider_thread)
+        .expect("persisted task should produce a task link");
+    assert!(running.running);
+
+    handler.mark_awaiting_user_input("task-1");
+    let blocked = handler
+        .link_from_thread(&provider_thread)
+        .expect("persisted task should still produce a task link");
+    assert!(!blocked.running);
+    assert_eq!(blocked.turn_status.as_deref(), Some("completed"));
+
+    handler.clear_awaiting_user_input("task-1");
+    let resumed = handler
+        .link_from_thread(&provider_thread)
+        .expect("persisted task should still produce a task link");
+    assert!(resumed.running);
+
+    let _ = fs::remove_file(index_path);
+}
+
 #[test]
 fn task_list_keeps_the_persisted_workspace_when_provider_cwd_changes() {
     let index_path = temp_runtime_work_index_path("authoritative-task-workspace");

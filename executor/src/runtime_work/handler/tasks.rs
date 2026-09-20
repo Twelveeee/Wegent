@@ -1550,6 +1550,7 @@ impl RuntimeWorkRpcHandler {
         local_task_id: &str,
         response: Value,
     ) -> Result<Value, AppIpcError> {
+        self.clear_awaiting_user_input(local_task_id);
         let sender = self
             .active_request_user_inputs
             .lock()
