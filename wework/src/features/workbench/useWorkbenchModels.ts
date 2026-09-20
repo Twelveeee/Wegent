@@ -68,6 +68,19 @@ function areModelOptionsEqual(left: ModelOptions, right: ModelOptions): boolean 
   return leftKeys.every(key => left[key] === right[key])
 }
 
+function pickEditedModelOptions(
+  options: ModelOptions | undefined,
+  editedOptionIds: Set<string> | undefined
+): ModelOptions {
+  const picked: ModelOptions = {}
+  if (!options || !editedOptionIds) return picked
+  for (const optionId of editedOptionIds) {
+    const value = options[optionId]
+    if (value !== undefined) picked[optionId] = value
+  }
+  return picked
+}
+
 function getSelectionKey(selectionConfig?: ModelSelectionConfig | null): string {
   const options = selectionConfig?.options ?? {}
   const optionsKey = Object.keys(options)
@@ -106,6 +119,10 @@ export function useWorkbenchModels({
   const selectedModelOptions = selectedModelOptionsByScope[scopeKey] ?? {}
   const selectedModelRef = useRef<Record<string, UnifiedModel | null>>({})
   const selectedModelOptionsRef = useRef<Record<string, ModelOptions>>({})
+  // Options the user changed explicitly are kept when the scope is restored again,
+  // because a refreshed selection config (runtime task snapshot, new chat defaults)
+  // only echoes what was sent to the runtime and would otherwise drop them.
+  const editedOptionIdsByScopeRef = useRef<Record<string, Set<string>>>({})
   const modelLoadRevisionRef = useRef(0)
   const [hasCompletedModelLoad, setHasCompletedModelLoad] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -174,9 +191,15 @@ export function useWorkbenchModels({
   const restoreSelection = useCallback(
     (availableModels: UnifiedModel[], nextSelectionConfig?: ModelSelectionConfig | null) => {
       const model = findModelForSelection(availableModels, nextSelectionConfig)
-      const nextOptions = model
-        ? normalizeModelOptions(model, nextSelectionConfig?.options ?? {})
-        : (nextSelectionConfig?.options ?? {})
+      const configuredOptions = nextSelectionConfig?.options ?? {}
+      const resolvedOptions = {
+        ...configuredOptions,
+        ...pickEditedModelOptions(
+          selectedModelOptionsRef.current[scopeKey],
+          editedOptionIdsByScopeRef.current[scopeKey]
+        ),
+      }
+      const nextOptions = model ? normalizeModelOptions(model, resolvedOptions) : resolvedOptions
       selectedModelRef.current[scopeKey] = model
       selectedModelOptionsRef.current[scopeKey] = nextOptions
       setSelectedModelByScope(current => {
@@ -336,6 +359,9 @@ export function useWorkbenchModels({
       }
       const currentSelection = selectedModelRef.current[targetScopeKey] ?? null
       const currentOptions = selectedModelOptionsRef.current[targetScopeKey] ?? {}
+      if (!isSameModelSelection(model, currentSelection)) {
+        delete editedOptionIdsByScopeRef.current[targetScopeKey]
+      }
       const nextOptions = resolveOptions(model, currentSelection, currentOptions)
       selectedModelRef.current[targetScopeKey] = model
       selectedModelOptionsRef.current[targetScopeKey] = nextOptions
@@ -405,6 +431,9 @@ export function useWorkbenchModels({
       }
       const currentModel = selectedModelRef.current[targetScopeKey] ?? null
       selectedModelOptionsRef.current[targetScopeKey] = nextOptions
+      const editedOptionIds = editedOptionIdsByScopeRef.current[targetScopeKey] ?? new Set<string>()
+      editedOptionIds.add(optionId)
+      editedOptionIdsByScopeRef.current[targetScopeKey] = editedOptionIds
       setSelectedModelOptionsByScope(current => ({ ...current, [targetScopeKey]: nextOptions }))
       if (!persist) return
       if (currentModel) {
@@ -430,6 +459,7 @@ export function useWorkbenchModels({
       options: ModelOptions = {},
       restoredSelectionConfig?: ModelSelectionConfig | null
     ) => {
+      delete editedOptionIdsByScopeRef.current[targetScopeKey]
       const nextOptions = model ? normalizeModelOptions(model, options) : options
       selectedModelRef.current[targetScopeKey] = model
       selectedModelOptionsRef.current[targetScopeKey] = nextOptions
