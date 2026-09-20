@@ -880,6 +880,129 @@ describe('workbench project chat hooks', () => {
     })
   })
 
+  test('keeps a locally selected plan mode when the runtime task snapshot changes', async () => {
+    const gptModel: UnifiedModel = {
+      name: 'gpt-5.6-sol',
+      type: 'public',
+      runtime: { family: 'openai.openai-responses' },
+      config: { ui: { family: 'codex-provider', controls: ['collaborationMode'] } },
+    }
+    const api = {
+      listModels: vi.fn().mockResolvedValue({ data: [gptModel] }),
+    }
+    const taskSnapshot: ModelSelectionConfig = {
+      modelName: gptModel.name,
+      modelType: gptModel.type,
+      options: { reasoning: 'high', collaborationMode: 'default' },
+    }
+    const { result, rerender } = renderHook(
+      ({ selectionConfig }: { selectionConfig: ModelSelectionConfig }) =>
+        useWorkbenchModels({
+          api,
+          locked: false,
+          scopeKey: 'user:1:runtime:device-1:task-1',
+          persistSelection: false,
+          selectionConfig,
+        }),
+      { initialProps: { selectionConfig: taskSnapshot } }
+    )
+
+    await waitFor(() => expect(result.current.selectedModel).toEqual(gptModel))
+    act(() => result.current.setSelectedModelOption('collaborationMode', 'plan'))
+    expect(result.current.selectedModelOptions.collaborationMode).toBe('plan')
+
+    // The next work list refresh echoes the task snapshot again.
+    rerender({
+      selectionConfig: {
+        ...taskSnapshot,
+        options: { ...taskSnapshot.options, reasoning: 'medium' },
+      },
+    })
+
+    await waitFor(() => expect(result.current.selectedModelOptions.reasoning).toBe('medium'))
+    expect(result.current.selectedModelOptions.collaborationMode).toBe('plan')
+  })
+
+  test('keeps a locally selected plan mode while adopting a refreshed task model', async () => {
+    const gptModel: UnifiedModel = {
+      name: 'gpt-5.6-sol',
+      type: 'public',
+      runtime: { family: 'openai.openai-responses' },
+      config: { ui: { family: 'codex-provider', controls: ['collaborationMode'] } },
+    }
+    const refreshedModel: UnifiedModel = {
+      name: 'gpt-5.6-luna',
+      type: 'public',
+      runtime: { family: 'openai.openai-responses' },
+      config: { ui: { family: 'codex-provider', controls: ['collaborationMode'] } },
+    }
+    const api = {
+      listModels: vi.fn().mockResolvedValue({ data: [gptModel, refreshedModel] }),
+    }
+    const { result, rerender } = renderHook(
+      ({ selectionConfig }: { selectionConfig: ModelSelectionConfig }) =>
+        useWorkbenchModels({
+          api,
+          locked: false,
+          scopeKey: 'user:1:runtime:device-1:task-1',
+          persistSelection: false,
+          selectionConfig,
+        }),
+      {
+        initialProps: {
+          selectionConfig: {
+            modelName: gptModel.name,
+            modelType: gptModel.type,
+            options: { reasoning: 'high', collaborationMode: 'default' },
+          } as ModelSelectionConfig,
+        },
+      }
+    )
+
+    await waitFor(() => expect(result.current.selectedModel).toEqual(gptModel))
+    act(() => result.current.setSelectedModelOption('collaborationMode', 'plan'))
+
+    rerender({
+      selectionConfig: {
+        modelName: refreshedModel.name,
+        modelType: refreshedModel.type,
+        options: { reasoning: 'high', collaborationMode: 'default' },
+      },
+    })
+
+    await waitFor(() => expect(result.current.selectedModel).toEqual(refreshedModel))
+    expect(result.current.selectedModelOptions.collaborationMode).toBe('plan')
+  })
+
+  test('keeps a locally selected plan mode chosen before the model catalog loads', async () => {
+    const gptModel: UnifiedModel = {
+      name: 'gpt-5.6-sol',
+      type: 'public',
+      runtime: { family: 'openai.openai-responses' },
+      config: { ui: { family: 'codex-provider', controls: ['collaborationMode'] } },
+    }
+    const api = {
+      listModels: vi.fn().mockResolvedValue({ data: [gptModel] }),
+    }
+    const { result } = renderHook(() =>
+      useWorkbenchModels({
+        api,
+        locked: false,
+        scopeKey: 'user:1:new-task:standalone:0',
+        selectionConfig: { modelName: '', modelType: null, options: {} },
+        defaultSelectionConfig: models =>
+          models.length > 0
+            ? { modelName: models[0].name, modelType: models[0].type, options: {} }
+            : null,
+      })
+    )
+
+    act(() => result.current.setSelectedModelOption('collaborationMode', 'plan'))
+
+    await waitFor(() => expect(result.current.selectedModel).toEqual(gptModel))
+    expect(result.current.selectedModelOptions.collaborationMode).toBe('plan')
+  })
+
   test('loads skills and ignores skill changes when locked', async () => {
     const skill: UnifiedSkill = {
       id: 1,
