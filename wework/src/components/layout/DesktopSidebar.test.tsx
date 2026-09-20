@@ -566,13 +566,23 @@ describe('DesktopSidebar', () => {
                     title: 'Unread task',
                     runtime: 'codex',
                   },
+                  {
+                    taskId: 'goal-attention-task',
+                    workspacePath: '/Users/alice/repo/Wegent',
+                    title: 'Goal needs input',
+                    runtime: 'codex',
+                    running: false,
+                    status: 'active',
+                    goalStatus: 'active',
+                    goalExecutionStatus: 'needsAttention',
+                  },
                 ],
               },
             ],
           },
         ],
         chats: [],
-        totalTasks: 3,
+        totalTasks: 4,
       },
       unreadRuntimeTaskKeys: new Set(['local-device\0unread-task']),
       onSetRuntimeProjectPinned,
@@ -587,8 +597,8 @@ describe('DesktopSidebar', () => {
     expect(hoverCard).toHaveAttribute('role', 'dialog')
     expect(hoverCard).toHaveClass('pointer-events-auto')
     expect(hoverCard).toHaveTextContent('Wegent')
-    expect(hoverCard).toHaveTextContent('3 个任务')
-    expect(hoverCard).toHaveTextContent('1 个等待中')
+    expect(hoverCard).toHaveTextContent('4 个任务')
+    expect(hoverCard).toHaveTextContent('2 个等待中')
     expect(hoverCard).toHaveTextContent('1 个未读')
     expect(hoverCard).toHaveTextContent('1 个运行中')
     expect(hoverCard).not.toHaveTextContent('wecode-ai/Wegent')
@@ -972,6 +982,16 @@ describe('DesktopSidebar', () => {
                     status: 'waiting_for_user_input',
                   },
                   {
+                    taskId: 'goal-attention-task',
+                    workspacePath: '/repo/Wegent',
+                    title: 'Goal needing input',
+                    runtime: 'codex',
+                    running: false,
+                    status: 'active',
+                    goalStatus: 'active',
+                    goalExecutionStatus: 'needsAttention',
+                  },
+                  {
                     taskId: 'idle-task',
                     workspacePath: '/repo/Wegent',
                     title: 'Idle task',
@@ -1034,6 +1054,7 @@ describe('DesktopSidebar', () => {
       'runtime-local-task-row-unread-task',
       'runtime-local-task-row-waiting-task',
       'runtime-local-task-row-running-waiting-task',
+      'runtime-local-task-row-goal-attention-task',
       'runtime-local-task-row-running-task',
     ])
     expect(screen.queryByTestId('projects-section-toggle')).not.toBeInTheDocument()
@@ -1336,6 +1357,59 @@ describe('DesktopSidebar', () => {
       'runtime-local-task-row-recent-waiting-task',
       'runtime-local-task-row-older-waiting-task',
     ])
+  })
+
+  test('shows a waiting bell instead of a running spinner when a Goal needs user input', () => {
+    renderSidebar({
+      runtimeWork: {
+        projects: [
+          {
+            project: { id: 7, key: 'project-7', name: 'Wegent' },
+            deviceWorkspaces: [
+              {
+                deviceId: 'local-device',
+                available: true,
+                workspacePath: '/repo/Wegent',
+                tasks: [
+                  {
+                    taskId: 'goal-attention-task',
+                    workspacePath: '/repo/Wegent',
+                    title: 'Goal needs input',
+                    runtime: 'codex',
+                    running: false,
+                    status: 'active',
+                    goalStatus: 'active',
+                    goalExecutionStatus: 'needsAttention',
+                  },
+                  {
+                    taskId: 'goal-running-task',
+                    workspacePath: '/repo/Wegent',
+                    title: 'Goal running',
+                    runtime: 'codex',
+                    running: true,
+                    status: 'running',
+                    goalStatus: 'active',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        chats: [],
+        totalTasks: 2,
+      },
+    })
+
+    fireEvent.click(screen.getByTestId('project-item-button'))
+
+    expect(screen.getByTestId('runtime-local-task-waiting-goal-attention-task')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('runtime-local-task-running-goal-attention-task')
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId('runtime-local-task-running-goal-running-task')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('runtime-local-task-waiting-goal-running-task')
+    ).not.toBeInTheDocument()
   })
 
   test('toggles the priority filter with the configured macOS shortcut', () => {

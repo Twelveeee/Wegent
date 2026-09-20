@@ -837,6 +837,9 @@ function hasRuntimeTaskBranchWarning(task: RuntimeTaskSummary): boolean {
 }
 
 function isRuntimeTaskWaiting(task: RuntimeTaskSummary): boolean {
+  // A Goal that stopped on user intervention keeps `status: active` and only
+  // reports the wait through its Goal execution status.
+  if (task.goalExecutionStatus === 'needsAttention') return true
   const status = task.status?.trim().toLowerCase() ?? ''
   return ['waiting', 'approval', 'input', 'attention', 'blocked'].some(value =>
     status.includes(value)
@@ -1903,7 +1906,7 @@ function RuntimeTaskRow({
                       ) : null}
                     </span>
                   </span>
-                ) : priorityReason === 'waiting' ? (
+                ) : priorityReason === 'waiting' || isRuntimeTaskWaiting(task) ? (
                   <span
                     data-testid={`runtime-local-task-waiting-${task.taskId}`}
                     role="status"
