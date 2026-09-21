@@ -10,6 +10,7 @@ import { create } from 'tar'
 
 import { hashComponentPath } from './lib/component-content-hash.mjs'
 import { componentReleaseScope } from './desktop-component-release.mjs'
+import { resolveDesktopBuildProfile } from './desktop-build-profile.mjs'
 
 const weworkRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const installerRoot = join(weworkRoot, 'electron', 'release-installer')
@@ -26,7 +27,12 @@ if (!platform || !arch || !version || !outputDirectory) {
 
 const output = resolve(outputDirectory)
 const installerArchitecture = platform === 'linux' && arch === 'x64' ? 'x86_64' : arch
-const useComponentizedHostUpdate = process.env.WEWORK_USE_COMPONENTIZED_HOST_UPDATE === 'true'
+const { testBuild } = resolveDesktopBuildProfile(process.env.WEWORK_BUILD_PROFILE)
+if (testBuild && (platform !== 'macos' || arch !== 'arm64')) {
+  throw new Error('macos-arm64-test assets require macOS arm64')
+}
+const useComponentizedHostUpdate =
+  !testBuild && process.env.WEWORK_USE_COMPONENTIZED_HOST_UPDATE === 'true'
 await rm(output, { recursive: true, force: true })
 await mkdir(output, { recursive: true })
 
@@ -35,22 +41,24 @@ if (platform === 'macos') {
     installerRoot,
     new RegExp(`^WeWork_${escape(version)}_macos_${arch}\\.dmg$`)
   )
-  const installerZip = await findFile(
-    installerRoot,
-    new RegExp(`^WeWork_${escape(version)}_macos_${arch}\\.zip$`)
-  )
   await cp(dmg, join(output, basename(dmg)))
-  await copyUpdateArtifacts([
-    installerZip,
-    ...(useComponentizedHostUpdate
-      ? [
-          await findFile(
-            onlineUpdateRoot,
-            new RegExp(`^WeWorkHostUpdate_${escape(version)}_macos_${arch}\\.zip$`)
-          ),
-        ]
-      : []),
-  ])
+  if (!testBuild) {
+    const installerZip = await findFile(
+      installerRoot,
+      new RegExp(`^WeWork_${escape(version)}_macos_${arch}\\.zip$`)
+    )
+    await copyUpdateArtifacts([
+      installerZip,
+      ...(useComponentizedHostUpdate
+        ? [
+            await findFile(
+              onlineUpdateRoot,
+              new RegExp(`^WeWorkHostUpdate_${escape(version)}_macos_${arch}\\.zip$`)
+            ),
+          ]
+        : []),
+    ])
+  }
 } else if (platform === 'windows') {
   const installer = await findFile(
     installerRoot,
@@ -91,7 +99,14 @@ if (platform === 'macos') {
 } else {
   throw new Error(`Unsupported desktop release platform: ${platform}`)
 }
-await prepareComponentAssets()
+if (testBuild) {
+  const checksums = await Promise.all(
+    (await readdir(output)).sort().map(async name => `${await sha256(join(output, name))}  ${name}`)
+  )
+  await writeFile(join(output, 'SHA256SUMS.txt'), `${checksums.join('\n')}\n`)
+} else {
+  await prepareComponentAssets()
+}
 
 async function prepareComponentAssets() {
   const packaged = JSON.parse(

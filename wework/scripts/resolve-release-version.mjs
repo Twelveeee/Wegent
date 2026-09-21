@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { appendFile } from 'node:fs/promises'
+import { appendFile, readFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { compareWeworkVersions, parseWeworkVersion } from './update-channel-manifests.mjs'
+import { resolveDesktopBuildProfile } from './desktop-build-profile.mjs'
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const BETA_VERSION_PATTERN = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
@@ -64,7 +65,12 @@ export function resolveReleaseVersion({
   githubRef = '',
   githubRefName = '',
   publishRelease = false,
+  buildProfile = 'release',
+  sourceVersion = '',
 }) {
+  if (resolveDesktopBuildProfile(buildProfile, publishRelease).testBuild) {
+    return resolveTestBuildVersion(inputVersion || sourceVersion)
+  }
   if (githubRef.startsWith('refs/tags/wework-v')) {
     const version = githubRefName.slice('wework-v'.length)
     const channel = version.includes('-beta.') ? 'beta' : 'stable'
@@ -102,6 +108,20 @@ export function resolveReleaseVersion({
   }
 }
 
+function resolveTestBuildVersion(inputVersion) {
+  const version = inputVersion.replace(/^v/, '')
+  const channel = version.includes('-beta.') ? 'beta' : 'stable'
+  if (channel === 'beta') validateBetaVersion(version)
+  else validateStableVersion(version)
+  return {
+    version,
+    channel,
+    releaseTag: `wework-v${version}`,
+    prerelease: channel === 'beta',
+    publishRelease: false,
+  }
+}
+
 function readTags() {
   const output = execFileSync('git', ['tag', '--list', 'wework-v*'], {
     encoding: 'utf8',
@@ -113,8 +133,15 @@ function readTags() {
 }
 
 async function main() {
+  const buildProfile = process.env.WEWORK_BUILD_PROFILE || 'release'
+  const testBuild = buildProfile === 'macos-arm64-test'
+  const sourceVersion = testBuild
+    ? JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version
+    : ''
   const result = resolveReleaseVersion({
-    tags: readTags(),
+    tags: testBuild ? [] : readTags(),
+    buildProfile,
+    sourceVersion,
     inputChannel: process.env.INPUT_CHANNEL || 'stable',
     inputVersion: process.env.INPUT_VERSION || '',
     githubRef: process.env.GITHUB_REF || '',
