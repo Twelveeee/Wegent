@@ -28,6 +28,15 @@ export function projectRuntimePaneTranscript(
   }
 }
 
+export function isRuntimeTaskWaitingForUserInput(
+  task: RuntimeTaskSummary | null | undefined
+): boolean {
+  if (!task) return false
+  if (task.goalExecutionStatus === 'needsAttention') return true
+  const normalizedStatus = task.status?.replace(/[_-]/g, '').trim().toLowerCase()
+  return normalizedStatus === 'waitingforuserinput'
+}
+
 export function isRuntimePaneTranscriptConfirmedIdle(transcript: RuntimePaneTranscript): boolean {
   if (transcript.running !== false) return false
   return !transcript.turns.some(turn => isRuntimeTurnRunningStatus(turn.status))

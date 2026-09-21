@@ -3,6 +3,7 @@ fn cached_transcript_response(
     mut messages: Vec<Value>,
     context_usage: Option<Value>,
     running: bool,
+    waiting_for_user_input: bool,
     limit: Option<usize>,
     before_cursor: Option<&str>,
     after_cursor: Option<&str>,
@@ -16,6 +17,7 @@ fn cached_transcript_response(
         messages,
         context_usage,
         running,
+        waiting_for_user_input,
         pagination: transcript_pagination(
             &link.runtime,
             limit,
@@ -121,6 +123,7 @@ struct TranscriptResponseInput {
     messages: Vec<Value>,
     context_usage: Option<Value>,
     running: bool,
+    waiting_for_user_input: bool,
     pagination: TranscriptPagination,
     full_content: bool,
     turn_item_source: TranscriptTurnItemSource,
@@ -176,6 +179,7 @@ fn transcript_response(input: TranscriptResponseInput) -> Value {
         messages,
         context_usage,
         running,
+        waiting_for_user_input,
         pagination,
         full_content,
         turn_item_source,
@@ -228,7 +232,19 @@ fn transcript_response(input: TranscriptResponseInput) -> Value {
             }
         }
     };
-    let turns = transcript_canonical_turns(&messages, turn_item_source);
+    let mut turns = transcript_canonical_turns(&messages, turn_item_source);
+    if waiting_for_user_input {
+        for turn in &mut turns {
+            let Some(status) = turn.get("status").and_then(Value::as_str) else {
+                continue;
+            };
+            if runtime_status_is_running(status) {
+                if let Some(object) = turn.as_object_mut() {
+                    object.insert("status".to_owned(), Value::String("done".to_owned()));
+                }
+            }
+        }
+    }
     json!({
         "success": true,
         "taskId": local_task_id,
@@ -463,6 +479,7 @@ fn transcript_navigation_response(
         messages: Vec::new(),
         context_usage: None,
         running: false,
+        waiting_for_user_input: false,
         pagination: TranscriptPagination::Opaque {
             before_cursor: None,
             after_cursor: None,

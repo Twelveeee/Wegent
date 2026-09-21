@@ -4082,6 +4082,7 @@ fn transcript_navigation_is_not_limited_to_the_visible_message_page() {
         messages,
         context_usage: None,
         running: false,
+        waiting_for_user_input: false,
         pagination: TranscriptPagination::Offset {
             limit: Some(2),
             before_cursor: None,
@@ -4097,6 +4098,35 @@ fn transcript_navigation_is_not_limited_to_the_visible_message_page() {
     assert_eq!(response["turnNavigation"].as_array().unwrap().len(), 2);
     assert_eq!(response["turnNavigation"][0]["promptPreview"], "old prompt");
     assert_eq!(response["turnNavigation"][1]["promptPreview"], "new prompt");
+}
+
+#[test]
+fn waiting_user_input_transcript_does_not_recover_a_streaming_turn() {
+    let response = transcript_response(TranscriptResponseInput {
+        local_task_id: "task-1".to_owned(),
+        workspace_path: "/tmp/project".to_owned(),
+        runtime: "codex".to_owned(),
+        messages: vec![json!({
+            "id": "assistant-1",
+            "turnId": "turn-1",
+            "role": "assistant",
+            "status": "inProgress",
+            "content": "Waiting for an answer",
+        })],
+        context_usage: None,
+        running: false,
+        waiting_for_user_input: true,
+        pagination: TranscriptPagination::Opaque {
+            before_cursor: None,
+            after_cursor: None,
+        },
+        full_content: false,
+        turn_item_source: TranscriptTurnItemSource::CachedMessages,
+        turn_navigation: Vec::new(),
+    });
+
+    assert_eq!(response["running"], false);
+    assert_eq!(response["turns"][0]["status"], "done");
 }
 
 #[test]

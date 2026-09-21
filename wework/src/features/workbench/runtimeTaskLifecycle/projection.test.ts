@@ -3,6 +3,7 @@ import type { RuntimeTaskSummary } from '@/types/api'
 import {
   isRuntimePaneTranscriptConfirmedIdle,
   isRuntimeTaskExecutionRunning,
+  isRuntimeTaskWaitingForUserInput,
   normalizeRuntimeTaskSummary,
   projectRuntimePaneTranscript,
   runtimeTaskReconciliationSnapshot,
@@ -124,6 +125,15 @@ describe('runtimeTaskProjection', () => {
         })
       )
     ).toBe(false)
+  })
+
+  test.each([
+    { status: 'waiting_for_user_input' },
+    { status: 'waiting-for-user-input' },
+    { status: 'waitingForUserInput' },
+    { goalExecutionStatus: 'needsAttention' as const },
+  ])('recognizes a task waiting for user input: %o', overrides => {
+    expect(isRuntimeTaskWaitingForUserInput(task(overrides))).toBe(true)
   })
 
   test('recognizes a real executor queued active Goal recovery without execution status', () => {

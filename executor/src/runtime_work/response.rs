@@ -214,10 +214,16 @@ impl RuntimeTaskLink {
         let local_settled_status = local_link.as_ref().and_then(local_settled_status);
         let goal_awaiting_user =
             local_link.as_ref().is_some_and(goal_execution_awaits_user_attention);
-        let provider_turn_running = !(goal_awaiting_user || awaiting_user_input)
+        let waiting_for_user = goal_awaiting_user || awaiting_user_input;
+        let provider_turn_running = !waiting_for_user
             && codex_thread_has_in_progress_turn_after(thread, local_completed_at);
-        let running = !local_archived && (execution_running || provider_turn_running);
-        let mut status = merged_task_status(thread, running, local_archived);
+        let running =
+            !local_archived && !waiting_for_user && (execution_running || provider_turn_running);
+        let mut status = if awaiting_user_input && !goal_awaiting_user {
+            "waiting_for_user_input".to_owned()
+        } else {
+            merged_task_status(thread, running, local_archived)
+        };
         let mut thread_status =
             codex_thread_status_type(thread).unwrap_or_else(|| "notLoaded".to_owned());
         let mut turn_status = task_turn_status(thread, running);
@@ -284,7 +290,7 @@ impl RuntimeTaskLink {
                     .or_else(|| timestamp_ms_field(thread, "updatedAt"))
                     .unwrap_or_else(now_ms)
             },
-            completed_at: if running || local_settled_status.is_some() {
+            completed_at: if running || waiting_for_user || local_settled_status.is_some() {
                 local_completed_at
             } else {
                 local_completed_at.or_else(|| timestamp_ms_field(thread, "updatedAt"))
@@ -1351,18 +1357,20 @@ mod tests {
                 "id": "thread-1",
                 "status": {"type": "active", "activeFlags": []},
                 "cwd": "/workspace/project",
+                "updatedAt": 1_780_000_100_000_i64,
                 "turns": [{"id": "turn-1", "status": "inProgress"}],
             }),
             None,
             "/workspace/project".to_owned(),
-            false,
+            true,
             true,
         );
 
         assert!(!link.running);
-        assert_eq!(link.status, "active");
+        assert_eq!(link.status, "waiting_for_user_input");
         assert_eq!(link.thread_status, "idle");
         assert_eq!(link.turn_status.as_deref(), Some("completed"));
+        assert_eq!(link.completed_at, None);
     }
 
     #[test]

@@ -8,6 +8,7 @@ import type {
 import type { RuntimePaneTranscript } from '@/types/workbench'
 import {
   isRuntimeTaskAuthoritativeCompletion,
+  isRuntimeTaskWaitingForUserInput,
   normalizeRuntimeTaskSummary,
   shouldReplaceRuntimeTaskProjection,
 } from './projection'
@@ -142,8 +143,11 @@ export class RuntimeTaskLifecycleStore {
       }>
     }
   ): void {
+    const current = this.getTask(address)
+    if (!current?.execution.running && isRuntimeTaskWaitingForUserInput(current?.task)) {
+      return
+    }
     if (transcript.running === true) {
-      const current = this.getTask(address)
       if (shouldIgnoreStaleRunningTranscript(current)) return
       this.executorStarted(address)
       return
@@ -270,6 +274,9 @@ export class RuntimeTaskLifecycleStore {
     )
     const hasStreamingTurn = Boolean(streamingTurn)
     const current = this.getTask(address)
+    if (!current?.execution.running && isRuntimeTaskWaitingForUserInput(current?.task)) {
+      return
+    }
     const ignoreStaleRunningTranscript = shouldIgnoreStaleRunningTranscript(current)
     if (hasStreamingTurn) {
       if (ignoreStaleRunningTranscript) return

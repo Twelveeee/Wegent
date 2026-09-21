@@ -948,6 +948,34 @@ describe('RuntimeTaskLifecycleStore', () => {
     expect(snapshot?.derived.isBusy).toBe(false)
   })
 
+  test('does not revive a task waiting for user input from a stale streaming transcript', () => {
+    const store = new RuntimeTaskLifecycleStore('waiting-input-transcript-test')
+    store.syncRuntimeWork(
+      runtimeWork(
+        task({
+          running: false,
+          status: 'waiting_for_user_input',
+          completedAt: null,
+          turnStatus: 'completed',
+        })
+      )
+    )
+
+    store.syncTranscript(
+      address,
+      transcript({
+        running: true,
+        turns: [{ id: 'turn-1', items: [], status: 'streaming' }],
+      })
+    )
+
+    const snapshot = store.getTask(address)
+    expect(snapshot?.execution.phase).toBe('idle')
+    expect(snapshot?.turn.phase).toBe('idle')
+    expect(snapshot?.derived.shouldShowSidebarRunning).toBe(false)
+    expect(snapshot?.task?.status).toBe('waiting_for_user_input')
+  })
+
   test('ignores a late send acceptance after an authoritative completion', () => {
     const store = new RuntimeTaskLifecycleStore('test')
 

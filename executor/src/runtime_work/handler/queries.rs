@@ -275,6 +275,13 @@ impl RuntimeWorkRpcHandler {
         let session_id = requested_session_id.or(linked_session_id);
         let running_hint = local_link.as_ref().is_some_and(|link| link.running);
         let local_execution_running = self.is_active_local_task(&local_task_id);
+        let goal_awaits_user = local_link
+            .as_ref()
+            .is_some_and(goal_execution_awaits_user_attention);
+        let awaits_user_input = self.is_awaiting_user_input(&local_task_id);
+        let waiting_for_user_input = goal_awaits_user || awaits_user_input;
+        let reported_local_execution_running =
+            local_execution_running && !waiting_for_user_input;
         if navigation_only {
             let Some(thread_id) = session_id else {
                 return Ok(transcript_navigation_response(
@@ -376,13 +383,14 @@ impl RuntimeWorkRpcHandler {
                         before_cursor: before_cursor.as_deref(),
                         after_cursor: after_cursor.as_deref(),
                         message_count: messages.len(),
-                        running: true,
+                        running: reported_local_execution_running,
                     });
                     return Ok(cached_transcript_response(
                         link,
                         messages,
                         None,
-                        true,
+                        reported_local_execution_running,
+                        waiting_for_user_input,
                         limit,
                         before_cursor.as_deref(),
                         after_cursor.as_deref(),
@@ -407,13 +415,14 @@ impl RuntimeWorkRpcHandler {
                 before_cursor: before_cursor.as_deref(),
                 after_cursor: after_cursor.as_deref(),
                 message_count: messages.len(),
-                running: link.running,
+                running: link.running && !waiting_for_user_input,
             });
             return Ok(cached_transcript_response(
                 link,
                 messages,
                 None,
-                local_execution_running,
+                reported_local_execution_running,
+                waiting_for_user_input,
                 limit,
                 before_cursor.as_deref(),
                 after_cursor.as_deref(),
@@ -434,7 +443,7 @@ impl RuntimeWorkRpcHandler {
                 before_cursor: before_cursor.as_deref(),
                 after_cursor: after_cursor.as_deref(),
                 message_count: 0,
-                running: local_execution_running,
+                running: reported_local_execution_running,
             });
             let pagination = transcript_pagination(&runtime, limit, before_cursor, after_cursor);
             return Ok(transcript_response(TranscriptResponseInput {
@@ -443,7 +452,8 @@ impl RuntimeWorkRpcHandler {
                 runtime,
                 messages: Vec::new(),
                 context_usage: None,
-                running: local_execution_running,
+                running: reported_local_execution_running,
+                waiting_for_user_input,
                 pagination,
                 full_content: include_full_content,
                 turn_item_source: TranscriptTurnItemSource::CachedMessages,
@@ -578,13 +588,8 @@ impl RuntimeWorkRpcHandler {
                 });
             }
         }
-        let goal_awaits_user = local_link
-            .as_ref()
-            .is_some_and(goal_execution_awaits_user_attention);
-        let awaits_user_input = self.is_awaiting_user_input(&local_task_id);
-        let running = local_execution_running
-            || (!(goal_awaits_user || awaits_user_input)
-                && codex_thread_has_in_progress_turn(&thread));
+        let running = !waiting_for_user_input
+            && (local_execution_running || codex_thread_has_in_progress_turn(&thread));
         let message_count = messages.len();
         let turn_navigation = if include_full_content
             || (before_cursor.is_none() && after_cursor.is_none() && page_before_cursor.is_none())
@@ -614,6 +619,7 @@ impl RuntimeWorkRpcHandler {
             messages,
             context_usage,
             running,
+            waiting_for_user_input,
             pagination: TranscriptPagination::Opaque {
                 before_cursor: if include_full_content {
                     None

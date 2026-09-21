@@ -249,6 +249,7 @@ impl RuntimeWorkRpcHandler {
             messages: messages.clone(),
             context_usage: transcript_context_usage(thread),
             running: codex_thread_has_in_progress_turn(thread),
+            waiting_for_user_input: false,
             pagination: TranscriptPagination::Opaque {
                 before_cursor: None,
                 after_cursor: None,
