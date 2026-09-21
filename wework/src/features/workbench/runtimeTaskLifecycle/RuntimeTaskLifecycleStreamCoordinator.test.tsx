@@ -646,6 +646,62 @@ describe('RuntimeTaskLifecycleStreamCoordinator', () => {
     expect(store.getTask(address)?.derived.shouldShowSidebarRunning).toBe(false)
   })
 
+  test('stops the sidebar spinner immediately when a turn waits for user input', async () => {
+    const store = new RuntimeTaskLifecycleStore('test')
+    const address = runtimeTaskAddress()
+    store.syncRuntimeWork(runtimeWork(true))
+    store.turnStarted(address, 'turn-1')
+    let streamHandlers: ChatStreamHandlers = {}
+    const getRuntimeTranscript = vi.fn().mockResolvedValue({
+      ...runtimeTranscript(false),
+      turns: [
+        {
+          id: 'turn-1',
+          status: 'completed',
+          completedAt: 1_786_692_066_192,
+          items: [],
+        },
+      ],
+    })
+    const services = {
+      chatStream: {
+        subscribe: vi.fn((handlers: ChatStreamHandlers) => {
+          streamHandlers = handlers
+          return vi.fn()
+        }),
+      },
+      executorClient: {
+        runtime: {
+          listRuntimeWork: vi.fn(),
+          getRuntimeTranscript,
+        },
+      },
+    } as unknown as WorkbenchServices
+
+    render(<RuntimeTaskLifecycleStreamCoordinator services={services} store={store} />)
+    await act(async () => {
+      streamHandlers.onChatDone?.({
+        taskId: address.taskId,
+        deviceId: address.deviceId,
+        subtaskId: 'turn-1',
+        result: {
+          response: {
+            silent_exit_reason: 'waiting_for_user_input',
+          },
+        },
+      })
+    })
+
+    expect(store.getTask(address)?.task).toMatchObject({
+      running: false,
+      status: 'waiting_for_user_input',
+      completedAt: null,
+    })
+    expect(store.getTask(address)?.execution.phase).toBe('idle')
+    expect(store.getTask(address)?.derived.shouldShowSidebarRunning).toBe(false)
+    await waitFor(() => expect(getRuntimeTranscript).toHaveBeenCalledTimes(1))
+  })
+
   test('settles a matching cancellation without projecting executor execution as idle', async () => {
     const store = new RuntimeTaskLifecycleStore('test')
     const address = runtimeTaskAddress()

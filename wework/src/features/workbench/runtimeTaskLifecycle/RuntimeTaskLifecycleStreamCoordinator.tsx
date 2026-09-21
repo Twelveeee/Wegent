@@ -14,7 +14,11 @@ import {
 import { subscribeSystemResume } from '@/desktop/systemResume'
 import type { RuntimeTaskLifecycleStore } from './RuntimeTaskLifecycleStore'
 import { runtimeTaskLifecycleTransitionChanged } from './RuntimeTaskLifecycleStore'
-import { isRuntimePaneTranscriptConfirmedIdle, projectRuntimePaneTranscript } from './projection'
+import {
+  isRuntimePaneTranscriptConfirmedIdle,
+  isRuntimeWaitingForUserInputResult,
+  projectRuntimePaneTranscript,
+} from './projection'
 import type { RuntimeTaskAddress } from '@/types/api'
 
 type ReconciliationReason = 'event_lagged' | 'runtime_replaced' | 'system_resume'
@@ -212,6 +216,12 @@ export function RuntimeTaskLifecycleStreamCoordinator({
         store.turnStarted(address, payload.subtaskId?.trim() || null)
       },
       onChatDone: payload => {
+        const address = matchingLifecycleAddress(store, payload)
+        if (address && isRuntimeWaitingForUserInputResult(payload.result)) {
+          store.userInputRequested(address, payload.subtaskId?.trim() || null)
+          void reconcileTerminalTranscript(address)
+          return
+        }
         const match = settleMatchingTask(payload, 'succeeded')
         if (match) {
           void reconcileTerminalTranscript(match.address, 'succeeded')

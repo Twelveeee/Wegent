@@ -195,6 +195,29 @@ export function reduceRuntimeTaskLifecycle(
         expectedExecutorRunning: false,
       }
 
+    case 'user_input_requested':
+      if (event.turnId && state.activeTurnId && event.turnId !== state.activeTurnId) {
+        return state
+      }
+      return {
+        ...state,
+        task: state.task
+          ? {
+              ...state.task,
+              running: false,
+              completedAt: null,
+              status: 'waiting_for_user_input',
+              threadStatus: 'idle',
+              turnStatus: 'completed',
+            }
+          : state.task,
+        executionPhase: 'idle',
+        turnPhase: 'idle',
+        turnOutcome: 'succeeded',
+        activeTurnId: null,
+        expectedExecutorRunning: false,
+      }
+
     case 'turn_started':
       return {
         ...state,

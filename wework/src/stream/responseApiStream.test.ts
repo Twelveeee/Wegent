@@ -39,6 +39,39 @@ describe('emitResponseApiEvent', () => {
     expect(state.toolContexts.size).toBe(0)
   })
 
+  test('preserves a waiting-for-user-input completion reason', () => {
+    const onChatDone = vi.fn()
+
+    emitResponseApiEvent(
+      { onChatDone },
+      'response.completed',
+      {
+        taskId: 'task-1',
+        subtaskId: 'turn-1',
+        data: {
+          response: {
+            value: '',
+            silent_exit: true,
+            silent_exit_reason: 'waiting_for_user_input',
+          },
+        },
+      },
+      createResponseApiStreamState()
+    )
+
+    expect(onChatDone).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        subtaskId: 'turn-1',
+        result: expect.objectContaining({
+          response: expect.objectContaining({
+            silent_exit_reason: 'waiting_for_user_input',
+          }),
+        }),
+      })
+    )
+  })
+
   test('preserves a snake-case client user message id when a Codex turn starts', () => {
     const onChatStart = vi.fn()
 

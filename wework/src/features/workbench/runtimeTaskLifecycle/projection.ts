@@ -1,4 +1,4 @@
-import type { RuntimeTaskSummary, RuntimeTranscriptResponse } from '@/types/api'
+import type { ChatResultPayload, RuntimeTaskSummary, RuntimeTranscriptResponse } from '@/types/api'
 import type { RuntimePaneTranscript } from '@/types/workbench'
 import type { RuntimeTaskLifecycleSnapshot } from './types'
 import {
@@ -7,6 +7,26 @@ import {
 } from '../runtimePaneMessages'
 
 export type RuntimeTaskBoardState = 'attention' | 'queued' | 'active' | 'completed'
+
+export function isRuntimeWaitingForUserInputResult(
+  result: ChatResultPayload | null | undefined
+): boolean {
+  if (!result) return false
+  const response =
+    typeof result.response === 'object' &&
+    result.response !== null &&
+    !Array.isArray(result.response)
+      ? (result.response as Record<string, unknown>)
+      : null
+  const candidates: Array<Record<string, unknown> | null> = [result, response]
+  return candidates.some(candidate => {
+    if (!candidate) return false
+    return (
+      candidate.silent_exit_reason === 'waiting_for_user_input' ||
+      candidate.silentExitReason === 'waiting_for_user_input'
+    )
+  })
+}
 
 export function projectRuntimePaneTranscript(
   transcript: RuntimeTranscriptResponse

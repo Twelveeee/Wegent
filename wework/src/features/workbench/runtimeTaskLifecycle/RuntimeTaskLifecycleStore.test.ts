@@ -961,6 +961,17 @@ describe('RuntimeTaskLifecycleStore', () => {
       )
     )
 
+    store.syncRuntimeWork(
+      runtimeWork(
+        task({
+          running: true,
+          status: 'active',
+          threadStatus: 'active',
+          turnStatus: 'inProgress',
+          updatedAt: '2026-09-21T03:00:00Z',
+        })
+      )
+    )
     store.syncTranscript(
       address,
       transcript({

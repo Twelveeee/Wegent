@@ -247,6 +247,10 @@ export class RuntimeTaskLifecycleStore {
     this.dispatch(address, { type: 'executor_settled' })
   }
 
+  userInputRequested(address: RuntimeTaskAddress, turnId?: string | null): void {
+    this.dispatch(address, { type: 'user_input_requested', turnId })
+  }
+
   turnStarted(address: RuntimeTaskAddress, turnId?: string | null): void {
     this.dispatch(address, { type: 'turn_started', turnId })
   }
@@ -337,6 +341,13 @@ export class RuntimeTaskLifecycleStore {
     const previous = machine.getSnapshot()
     const key = previous.key
     const wasRunning = previous.derived.isRunning || this.previousRunningTaskKeys.has(key)
+    const waitingTaskRevival =
+      canonicalEvent.type === 'executor_snapshot_received' &&
+      previous.task !== null &&
+      isRuntimeTaskWaitingForUserInput(previous.task) &&
+      machine.getState().expectedExecutorRunning !== true &&
+      canonicalEvent.task.running === true
+    if (waitingTaskRevival) return false
     if (
       canonicalEvent.type === 'executor_snapshot_received' &&
       previous.task &&

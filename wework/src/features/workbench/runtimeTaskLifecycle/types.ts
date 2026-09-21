@@ -77,6 +77,7 @@ export type RuntimeTaskLifecycleEvent =
   | { type: 'stop_rejected' }
   | { type: 'executor_started' }
   | { type: 'executor_settled' }
+  | { type: 'user_input_requested'; turnId?: string | null }
   | { type: 'turn_started'; turnId?: string | null }
   | {
       type: 'turn_settled'
