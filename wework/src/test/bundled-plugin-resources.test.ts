@@ -290,13 +290,10 @@ describe('bundled plugin resources', () => {
     expect(builderConfig).toContain('weworkAppId: identity.identifier')
     expect(signingKeychainStep).toContain('security import')
     expect(signingKeychainStep).toContain('security list-keychains -d user -s')
-    expect(signingKeychainStep).toContain(
-      'echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"'
-    )
-    expect(signingKeychainStep).toContain('echo "CSC_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"')
-    expect(signingKeychainStep).toContain(
-      'echo "MACOS_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"'
-    )
+    expect(signingKeychainStep).toContain('echo "APPLE_SIGNING_IDENTITY=$identity"')
+    expect(signingKeychainStep).toContain('echo "CSC_KEYCHAIN=$keychain_path"')
+    expect(signingKeychainStep).toContain('echo "MACOS_KEYCHAIN_PATH=$keychain_path"')
+    expect(signingKeychainStep).toContain('} >> "$GITHUB_ENV"')
     expect(workflow).not.toMatch(/^\s+CSC_LINK:/m)
     expect(workflow).not.toMatch(/^\s+CSC_KEY_PASSWORD:/m)
     expect(workflow).toContain('generate-desktop-update-manifests.mjs')
@@ -360,10 +357,19 @@ describe('bundled plugin resources', () => {
       resolve(process.cwd(), '../.github/workflows/wework-app.yml'),
       'utf8'
     )
+    const buildProfile = readFileSync(
+      resolve(process.cwd(), 'scripts/desktop-build-profile.mjs'),
+      'utf8'
+    )
 
-    expect(workflow).toMatch(/name: macOS arm64\s+runner: macos-14\s+platform: macos\s+arch: arm64/)
-    expect(workflow).toMatch(
-      /name: macOS x64\s+runner: macos-14\s+platform: macos\s+arch: x64\s+node_arch: x64/
+    expect(buildProfile).toMatch(
+      /name: 'macOS arm64',\s+runner: 'macos-14',\s+platform: 'macos',\s+arch: 'arm64'/
+    )
+    expect(buildProfile).toMatch(
+      /name: 'macOS x64',\s+runner: 'macos-14',\s+platform: 'macos',\s+arch: 'x64',\s+node_arch: 'x64'/
+    )
+    expect(workflow).toContain(
+      'matrix: ${{ fromJSON(needs.prepare-release.outputs.build_matrix) }}'
     )
     expect(workflow).toContain('- name: Install Rosetta 2')
     expect(workflow).toContain('architecture: ${{ matrix.node_arch }}')
@@ -381,10 +387,10 @@ describe('bundled plugin resources', () => {
     expect(workflow).toContain(
       '--parallel-segments release-package-startup,component-update,app-update-differential'
     )
-    expect(workflow).toContain('windows-latest')
-    expect(workflow).toContain('ubuntu-latest')
-    expect(workflow).toContain('macOS arm64')
-    expect(workflow).toContain('macOS x64')
+    expect(buildProfile).toContain("runner: 'windows-latest'")
+    expect(buildProfile).toContain("runner: 'ubuntu-latest'")
+    expect(buildProfile).toContain("name: 'macOS arm64'")
+    expect(buildProfile).toContain("name: 'macOS x64'")
     expect(workflow).toContain('merge-multiple: true')
   })
 })
