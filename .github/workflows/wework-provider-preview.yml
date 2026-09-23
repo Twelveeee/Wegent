@@ -32,30 +32,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Materialize reviewed changes
+      - name: Materialize reviewed follow-up
         id: source
         shell: bash
         run: |
           set -euo pipefail
-          if test -f .github/provider-change-1.b64; then
-            node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          import { gunzipSync } from 'node:zlib'
-          import { createHash } from 'node:crypto'
-          const encoded = [1, 2, 3, 4].map(n => readFileSync(`.github/provider-change-${n}.b64`, 'utf8')).join('')
-          const patch = gunzipSync(Buffer.from(encoded, 'base64'))
-          const digest = createHash('sha256').update(patch).digest('hex')
-          if (digest !== '2a892a2d9d7c9b3817db84f52d900456481e6716def039ba4a629df2076419f9') throw new Error('Source transfer checksum mismatch')
-          writeFileSync(`${process.env.RUNNER_TEMP}/provider.patch`, patch)
-          NODE
-            git apply --check "$RUNNER_TEMP/provider.patch"
-            git apply "$RUNNER_TEMP/provider.patch"
-            git rm .github/provider-change-{1,2,3,4}.b64
+          if test -f .github/provider-followup.patch; then
+            echo 'fc7e9d499a67e1c17c682860afff6c10af8c3f9b2dc8bb6a202fbf77a0acb82d  .github/provider-followup.patch' | sha256sum -c -
+            git apply --check .github/provider-followup.patch
+            git apply .github/provider-followup.patch
+            git rm .github/provider-followup.patch .github/provider-followup.b64
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add wework docs
+            git add wework
             git diff --cached --check
-            git commit -m 'feat(wework): add shared providers and bidirectional YAML model settings'
+            git commit -m 'fix(wework): preserve preset capabilities and isolate provider preview updates'
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
