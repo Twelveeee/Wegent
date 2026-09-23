@@ -20,21 +20,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f .github/provider-preview-patch.1.b64 ]]; then
-            python3 - <<'PY'
-          import base64,gzip,hashlib,pathlib
-          data=''.join(pathlib.Path(f'.github/provider-preview-patch.{i}.b64').read_text().strip() for i in range(1,8))
-          patch=gzip.decompress(base64.b64decode(data,validate=True))
-          assert hashlib.sha256(patch).hexdigest()=='85e606908423ea67d1f1b9e1a9c79e4b6a6b4c28076f240a2dede697081ec481','Patch checksum mismatch'
-          pathlib.Path('/tmp/provider.patch').write_bytes(patch)
-          PY
-            git apply --check /tmp/provider.patch
-            git apply /tmp/provider.patch
-            rm .github/provider-preview-patch.*.b64
+          if [[ -f .github/provider-url-fix.patch ]]; then
+            git apply --check .github/provider-url-fix.patch
+            git apply .github/provider-url-fix.patch
+            git rm .github/provider-url-fix.patch
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add -A -- wework .github
-            git commit -m 'feat(wework): add shared providers and bound YAML model configuration'
+            git add -- wework
+            git commit -m 'fix(wework): preserve explicit provider API prefixes'
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -71,29 +64,12 @@ jobs:
         with:
           node-version: '24'
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - uses: actions/cache@v4
-        id: executor
-        with:
-          path: executor/target/aarch64-apple-darwin/release/wegent-executor
-          key: provider-executor-arm64-01971fc-v1
-      - name: Native executor
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p provider-verification
-          if [[ ! -x executor/target/aarch64-apple-darwin/release/wegent-executor ]]; then
-            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/executor/target" cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
-          fi
-          file executor/target/aarch64-apple-darwin/release/wegent-executor | tee provider-verification/executor-architecture.txt
-          echo "WEWORK_EXECUTOR_PATH=$GITHUB_WORKSPACE/executor/target/aarch64-apple-darwin/release/wegent-executor" >> "$GITHUB_ENV"
-          echo "$WEWORK_SOURCE_SHA" > provider-verification/SOURCE_SHA.txt
       - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p provider-verification
+          echo "$WEWORK_SOURCE_SHA" > provider-verification/SOURCE_SHA.txt
           pnpm install --frozen-lockfile 2>&1 | tee provider-verification/install-workspace.log
           pnpm --dir wework/electron install --frozen-lockfile 2>&1 | tee provider-verification/install-electron.log
       - name: Typecheck
@@ -108,6 +84,30 @@ jobs:
           set -euo pipefail
           pnpm --filter wework test src/features/model-settings/providerModelConfig.test.ts src/components/settings/ProviderConnectionEditor.test.tsx src/features/model-settings/localModelSettings.test.ts src/features/model-settings/localModelProviders.test.ts src/features/model-settings/localModelCatalog.test.ts src/features/model-settings/localModelConnectionTest.test.ts src/features/model-settings/cloudModelCatalogSync.test.tsx src/api/local/localServices.test.ts src/api/hybrid/hybridServices.test.ts src/components/settings/ModelSettingsPage.test.tsx --maxWorkers=2 2>&1 | tee provider-verification/tests-app.log
           pnpm --dir wework/electron test src/host/provider-config-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts --maxWorkers=2 2>&1 | tee provider-verification/tests-electron.log
+      - uses: actions/cache/restore@v4
+        id: executor
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.executor.outputs.cache-hit != 'true'
+        with:
+          targets: aarch64-apple-darwin
+      - name: Native executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -x executor/target/aarch64-apple-darwin/release/wegent-executor ]]; then
+            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/executor/target" cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
+          fi
+          file executor/target/aarch64-apple-darwin/release/wegent-executor | tee provider-verification/executor-architecture.txt
+          grep -q arm64 provider-verification/executor-architecture.txt
+          echo "WEWORK_EXECUTOR_PATH=$GITHUB_WORKSPACE/executor/target/aarch64-apple-darwin/release/wegent-executor" >> "$GITHUB_ENV"
+      - uses: actions/cache/save@v4
+        if: steps.executor.outputs.cache-hit != 'true'
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
       - name: Compile and prepare resources
         shell: bash
         run: |
@@ -122,6 +122,7 @@ jobs:
           pnpm --dir wework/electron exec electron-builder --config electron-builder.provider-preview.cjs --mac --arm64 --publish never 2>&1 | tee provider-verification/package.log
           file wework/electron/release-installer/mac-arm64/WeWork.app/Contents/MacOS/WeWork | tee provider-verification/app-architecture.txt
           grep -q arm64 provider-verification/app-architecture.txt
+          codesign --verify --deep --strict wework/electron/release-installer/mac-arm64/WeWork.app 2>&1 | tee provider-verification/signature-verify.txt
           hdiutil verify wework/electron/release-installer/WeWork_0.5.4-provider.1_macos_arm64.dmg 2>&1 | tee provider-verification/dmg-verify.txt
           cd wework/electron/release-installer
           shasum -a 256 WeWork_0.5.4-provider.1_macos_arm64.dmg WeWork_0.5.4-provider.1_macos_arm64.zip > SHA256SUMS.txt
