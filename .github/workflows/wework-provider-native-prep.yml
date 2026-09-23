@@ -1,0 +1,29 @@
+name: Wework Provider Native Preparation
+on:
+  push:
+    branches: [feature/wework-provider-yaml]
+    paths: [.github/workflows/wework-provider-native-prep.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  executor:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/cache@v4
+        id: executor
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
+      - name: Build unchanged native executor
+        if: steps.executor.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/executor/target
+        run: cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
+      - name: Verify architecture
+        run: file executor/target/aarch64-apple-darwin/release/wegent-executor
