@@ -1,3 +1,4 @@
+import { ensureProviderConfigLoaded } from '@/features/model-settings/providerConfigClient'
 import { createLocalProjectAutomationApi } from './localProjectAutomations'
 import {
   createRuntimeComposerApi,
@@ -2329,6 +2330,7 @@ export function createRuntimeWorkApiFromIpc(
   const resolveProxy = options.resolveProxy
 
   const prepareRuntimeModel = async (data: RuntimeModelPrepareRequest): Promise<boolean> => {
+    await ensureProviderConfigLoaded()
     const selectedModel = findLocalModelConfigByModelName(data.modelId)
     if (!options.syncConfiguredModelCatalog) return true
     if (!selectedModel?.catalogEntry) return true
@@ -3425,6 +3427,7 @@ export function createLocalAppServices(deps: LocalAppServicesDeps = {}): Workben
   }
 
   const ensureStatus = async () => {
+    await ensureProviderConfigLoaded()
     if (!ensurePromise) {
       ensurePromise = ensure()
         .then(async status => {

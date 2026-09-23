@@ -1,3 +1,4 @@
+import { ProviderSettingsSection } from './ProviderSettingsSection'
 import {
   AlertCircle,
   ChevronDown,
@@ -61,6 +62,7 @@ import {
   deleteLocalModelConfig,
   DEFAULT_LOCAL_MODEL_REQUEST_PATH,
   listLocalModelConfigs,
+  listLegacyLocalModelConfigs,
   LOCAL_MODEL_SETTINGS_CHANGED_EVENT,
   markLocalModelCatalogReady,
   normalizeLocalModelBaseUrl,
@@ -1120,7 +1122,7 @@ function LocalModelSettingsSection({
   onOpenCloudSettings?: () => void
 }) {
   const { t } = useTranslation('common')
-  const [models, setModels] = useState<LocalModelConfig[]>(() => listLocalModelConfigs())
+  const [models, setModels] = useState<LocalModelConfig[]>(() => listLegacyLocalModelConfigs())
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formVisible, setFormVisible] = useState(false)
   const [form, setForm] = useState<LocalModelFormState>(EMPTY_LOCAL_MODEL_FORM)
@@ -1139,7 +1141,7 @@ function LocalModelSettingsSection({
   const [restartingCatalog, setRestartingCatalog] = useState(false)
 
   const refreshModels = useCallback(() => {
-    setModels(listLocalModelConfigs())
+    setModels(listLegacyLocalModelConfigs())
   }, [])
 
   useEffect(() => {
@@ -2823,10 +2825,13 @@ function ModelInterfaceSettingsSection({
   onOpenCloudSettings?: () => void
 }) {
   return (
-    <LocalModelSettingsSection
-      cloudConnection={cloudConnection}
-      onOpenCloudSettings={onOpenCloudSettings}
-    />
+    <>
+      <ProviderSettingsSection />
+      <LocalModelSettingsSection
+        cloudConnection={cloudConnection}
+        onOpenCloudSettings={onOpenCloudSettings}
+      />
+    </>
   )
 }
 

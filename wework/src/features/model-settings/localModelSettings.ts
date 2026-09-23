@@ -13,6 +13,7 @@ export const DEEPSEEK_V4_CONTEXT_WINDOW = 1_048_576
 export interface LocalModelConfig {
   id: string
   providerProfileId?: string
+  providerConnectionId?: string
   displayName: string
   group?: string
   modelId: string
@@ -128,6 +129,28 @@ function validateLocalModelToolProfile(
   if (toolProfile === 'custom' && apiFormat !== 'openai-responses') {
     throw new Error('Native custom tools require the OpenAI Responses API format')
   }
+}
+
+// File-backed models are projections owned by the desktop configuration service.
+// They must never be serialized back into the legacy localStorage collection.
+let providerLocalModels: LocalModelConfig[] = []
+
+export function replaceProviderLocalModels(models: LocalModelConfig[]): void {
+  providerLocalModels = models
+  dispatchChanged(listLocalModelConfigs())
+}
+
+export function listLegacyLocalModelConfigs(): LocalModelConfig[] {
+  const managedIds = new Set(providerLocalModels.map(model => model.id))
+  return readStoredConfigs().filter(model => !managedIds.has(model.id))
+}
+
+export function removeMigratedLocalModelConfigs(ids: readonly string[]): void {
+  const managedIds = new Set(providerLocalModels.map(model => model.id))
+  if (ids.some(id => !managedIds.has(id)))
+    throw new Error('Migration was not committed to the model file')
+  const removed = new Set(ids)
+  writeStoredConfigs(readStoredConfigs().filter(model => !removed.has(model.id)))
 }
 
 function readStoredConfigs(): LocalModelConfig[] {
@@ -304,7 +327,7 @@ function normalizeStoredLocalModelConfig(config: LocalModelConfig): LocalModelCo
 
 function writeStoredConfigs(configs: LocalModelConfig[]): void {
   globalThis.localStorage?.setItem(LOCAL_MODEL_SETTINGS_STORAGE_KEY, JSON.stringify(configs))
-  dispatchChanged(configs)
+  dispatchChanged(listLocalModelConfigs())
 }
 
 function dispatchChanged(configs: LocalModelConfig[]): void {
@@ -457,10 +480,12 @@ function nextLocalModelUpdatedAt(previous?: LocalModelConfig): string {
 }
 
 export function listLocalModelConfigs(): LocalModelConfig[] {
-  return readStoredConfigs()
+  return [...listLegacyLocalModelConfigs(), ...providerLocalModels]
 }
 
 export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalModelConfig {
+  if (providerLocalModels.some(model => model.id === input.id))
+    throw new Error('Edit this model in its Provider connection or YAML file')
   const modelId = normalizeLocalModelId(input.modelId)
   const apiFormat = normalizeLocalModelApiFormat(input.apiFormat)
   const splitUrl = splitLocalModelRequestUrl(input.baseUrl, input.requestPath, apiFormat)
@@ -529,11 +554,14 @@ export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalMod
   }
   if (
     visionModelConfigId &&
-    !existing.some(config => config.id === visionModelConfigId && config.enabled)
+    !listLocalModelConfigs().some(config => config.id === visionModelConfigId && config.enabled)
   ) {
     throw new Error('Vision proxy model is missing or disabled')
   }
-  if (!enabled && existing.some(config => config.id !== id && config.visionModelConfigId === id)) {
+  if (
+    !enabled &&
+    listLocalModelConfigs().some(config => config.id !== id && config.visionModelConfigId === id)
+  ) {
     throw new Error('Vision proxy model is still referenced by another model')
   }
   const next: LocalModelConfig = {
@@ -573,6 +601,9 @@ export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalMod
 
 export function markLocalModelCatalogReady(snapshot: readonly LocalModelCatalogSnapshot[]): void {
   const writtenVersions = new Map(snapshot.map(model => [model.id, model.updatedAt]))
+  providerLocalModels = providerLocalModels.map(model =>
+    writtenVersions.get(model.id) === model.updatedAt ? { ...model, catalogReady: true } : model
+  )
   const configs = readStoredConfigs().map(config => {
     if (writtenVersions.get(config.id) !== config.updatedAt) return config
     const rest = { ...config }
@@ -603,6 +634,8 @@ export function reconcileLocalModelCatalogRuntime(runtimeInstanceId?: string): v
 }
 
 export function deleteLocalModelConfig(id: string): boolean {
+  if (providerLocalModels.some(model => model.id === id))
+    throw new Error('Delete this model from its Provider connection or YAML file')
   const configs = readStoredConfigs()
   const next = configs
     .filter(config => config.id !== id)
@@ -622,7 +655,7 @@ export function deleteLocalModelConfig(id: string): boolean {
 
 export function clearLocalModelConfigs(): void {
   globalThis.localStorage?.removeItem(LOCAL_MODEL_SETTINGS_STORAGE_KEY)
-  dispatchChanged([])
+  dispatchChanged(listLocalModelConfigs())
 }
 
 export function localModelName(configOrId: LocalModelConfig | string): string {
@@ -639,7 +672,7 @@ export function findLocalModelConfigByModelName(
   modelName?: string | null
 ): LocalModelConfig | null {
   const id = localModelIdFromModelName(modelName)
-  const configs = readStoredConfigs()
+  const configs = listLocalModelConfigs()
   if (id) return configs.find(config => config.id === id) ?? null
   if (!modelName) return null
   return (

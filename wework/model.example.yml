@@ -1,0 +1,18 @@
+# Local models only. Cloud models and Codex accounts are managed separately.
+# UI-entered keys are stored in the local encrypted credential store.
+version: 1
+providers:
+  - id: my-relay
+    name: My relay
+    base_url: https://gateway.example/v1
+    api_format: openai-responses
+    # api_key: "YOUR_LOCAL_KEY"  # Optional; never commit a real key.
+    models_path: /models
+    models:
+      - id: my-main-model
+        model_id: upstream-model-id
+        display_name: Main model
+      - id: my-fast-model
+        model_id: upstream-fast-model-id
+        display_name: Fast model
+        enabled: false

@@ -1,3 +1,4 @@
+import { registerProviderConfigCapabilities } from './provider-config-capabilities.js'
 import {
   app,
   BrowserWindow,
@@ -286,6 +287,12 @@ export function createElectronCapabilityRouter(
   }
 ): HostCapabilityRouter {
   const router = new HostCapabilityRouter()
+  registerProviderConfigCapabilities(
+    router,
+    window,
+    desktopServices.secureStorage,
+    desktopServices.events
+  )
   const attachments = new LocalAttachmentStore(localAttachmentRoot())
   const filePreviewLog = new RotatingLog({
     path: join(app.getPath('logs'), 'file-preview.log'),
