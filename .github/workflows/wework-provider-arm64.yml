@@ -1,0 +1,185 @@
+name: Wework Provider ARM64 Installer
+
+on:
+  push:
+    branches: [feature/wework-provider-arm64]
+    paths:
+      - wework/**
+      - .github/workflows/wework-provider-arm64.yml
+      - .github/scripts/sign-wework-provider-preview.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wework-provider-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      CI: true
+      TZ: Asia/Shanghai
+      NODE_OPTIONS: --max-old-space-size=8192
+      WEWORK_RELEASE_PLATFORM: macos
+      WEWORK_RELEASE_ARCH: arm64
+      WEWORK_CODEX_TARGET: aarch64-apple-darwin
+      WEWORK_DWS_TARGET: aarch64-apple-darwin
+      WEWORK_ELECTRON_DEPENDENCIES_READY: 'true'
+      WEWORK_ONLINE_UPDATE_INCLUDE_COMPONENTS: 'true'
+      VITE_WEWORK_RUNTIME_MODE: local-first
+      VITE_WEWORK_E2E: 'false'
+      WEWORK_UPDATE_BASE_URL: https://github.com/Twelveeee/Wegent/releases/download/wework-provider-preview-updater
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate isolated source
+        run: |
+          test "$GITHUB_REF_NAME" = feature/wework-provider-arm64
+          test "$(uname -m)" = arm64
+          test -f wework/electron/src/host/model-configuration-store.ts
+          test ! -f wework/src/features/model-settings/providerConfigClient.ts
+          mkdir -p provider-diagnostics
+          git archive --format=tar.gz HEAD -o provider-diagnostics/source.tar.gz
+          git diff --exit-code 01971fc01d1547adaefa7097c5741061b2a90c7b HEAD -- executor sdk shared wework/src/api/hybrid/hybridServices.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: provider-arm64-source
+          path: provider-diagnostics/source.tar.gz
+          retention-days: 14
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install locked dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir wework/electron install --frozen-lockfile
+      - name: Format and identify preview version
+        run: |
+          node wework/scripts/sync-desktop-release-version.mjs 0.5.4-provider.1
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process'
+          import { existsSync } from 'node:fs'
+          import { resolve } from 'node:path'
+          const files = execFileSync('git', ['diff', '--name-only', '01971fc01d1547adaefa7097c5741061b2a90c7b', '--', 'wework'], { encoding: 'utf8' }).trim().split('\n').filter(p => existsSync(p) && /\.(tsx?|json|md)$/.test(p)).map(p => resolve(p))
+          execFileSync('pnpm', ['--filter', 'wework', 'exec', 'prettier', '--write', ...files], { stdio: 'inherit' })
+          NODE
+      - name: Provider and cloud catalog regression tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir wework/electron test src/host/model-configuration-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts src/host/secure-value-store.test.ts --maxWorkers=2 2>&1 | tee provider-diagnostics/host-tests.log
+          pnpm --filter wework test src/features/model-settings/providerModelConfiguration.test.ts src/features/model-settings/localModelSettings.test.ts src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/api/hybrid/hybridServices.test.ts src/api/local/localServices.test.ts --maxWorkers=2 2>&1 | tee provider-diagnostics/renderer-tests.log
+      - name: Typecheck and lint
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --filter wework typecheck 2>&1 | tee provider-diagnostics/renderer-types.log
+          pnpm --dir wework/electron typecheck 2>&1 | tee provider-diagnostics/host-types.log
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process'
+          import { existsSync } from 'node:fs'
+          import { resolve } from 'node:path'
+          const files = execFileSync('git', ['diff', '--name-only', '01971fc01d1547adaefa7097c5741061b2a90c7b', '--', 'wework'], { encoding: 'utf8' }).trim().split('\n').filter(p => existsSync(p) && /\.tsx?$/.test(p)).map(p => resolve(p))
+          execFileSync('pnpm', ['--filter', 'wework', 'exec', 'eslint', ...files], { stdio: 'inherit' })
+          NODE
+          pnpm --filter wework lint:typography
+          git diff --check
+      - name: Record verified source on isolated branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          repo = os.environ['GITHUB_REPOSITORY']
+          branch = os.environ['GITHUB_REF_NAME']
+          assert branch == 'feature/wework-provider-arm64'
+          def api(path, payload=None):
+              command = ['gh', 'api', f'repos/{repo}/{path}']
+              if payload is not None: command += ['--method', 'POST', '--input', '-']
+              return json.loads(subprocess.check_output(command, input=json.dumps(payload).encode() if payload is not None else None))
+          parent = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert api(f'git/ref/heads/{branch}')['object']['sha'] == parent, 'Branch changed; do not overwrite concurrent edits'
+          paths = subprocess.check_output(['git', 'diff', '--name-only', 'HEAD', '--', 'wework'], text=True).splitlines()
+          sha = parent
+          if paths:
+              entries = []
+              for path in paths:
+                  assert path.startswith('wework/') and Path(path).is_file()
+                  entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': Path(path).read_text()})
+              tree = api('git/trees', {'base_tree': api(f'git/commits/{parent}')['tree']['sha'], 'tree': entries})
+              commit = api('git/commits', {'message': 'style(wework): record verified ARM64 provider preview source', 'tree': tree['sha'], 'parents': [parent]})
+              sha = commit['sha']
+              subprocess.run(['gh', 'api', f'repos/{repo}/git/refs/heads/{branch}', '--method', 'PATCH', '--input', '-'], input=json.dumps({'sha': sha, 'force': False}).encode(), check=True)
+              subprocess.run(['git', 'fetch', 'origin', sha], check=True)
+              subprocess.run(['git', 'reset', '--mixed', sha], check=True)
+          with open(os.environ['GITHUB_ENV'], 'a') as stream: stream.write(f'WEWORK_SOURCE_SHA={sha}\n')
+          PY
+      - uses: actions/cache/restore@v4
+        id: executor
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.executor.outputs.cache-hit != 'true'
+        with:
+          targets: aarch64-apple-darwin
+      - name: Build native executor if needed
+        if: steps.executor.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/executor/target
+        run: cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
+      - name: Set executor path
+        run: |
+          lipo executor/target/aarch64-apple-darwin/release/wegent-executor -verify_arch arm64
+          echo "WEWORK_EXECUTOR_PATH=$GITHUB_WORKSPACE/executor/target/aarch64-apple-darwin/release/wegent-executor" >> "$GITHUB_ENV"
+      - name: Compile production application
+        run: |
+          pnpm --filter wework prepare:electron
+          pnpm --dir wework/electron prepare:package
+          pnpm --dir wework/electron build
+      - name: Package and verify ARM64 installer
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          node .github/scripts/sign-wework-provider-preview.mjs
+          pnpm --dir wework/electron exec electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never -c.mac.identity=- -c.mac.notarize=false
+          APP=wework/electron/release-installer/mac-arm64/WeWork.app
+          EXE="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP/Contents/Info.plist")"
+          lipo "$EXE" -verify_arch arm64
+          codesign --verify --deep --strict "$APP"
+          mkdir -p provider-delivery
+          cp wework/electron/release-installer/*.dmg provider-delivery/
+          cp wework/electron/release-installer/*.zip provider-delivery/
+          for disk in provider-delivery/*.dmg; do hdiutil verify "$disk"; done
+          printf 'Source: %s\nArchitecture: macOS arm64\nVersion: 0.5.4-provider.1\nSigning: ad-hoc; not Apple Developer ID signed or notarized\nOfficial update publishing: disabled\n' "$WEWORK_SOURCE_SHA" > provider-delivery/BUILD-INFO.txt
+          git archive --format=tar.gz HEAD -o provider-delivery/source.tar.gz
+          (cd provider-delivery && shasum -a 256 *.dmg *.zip source.tar.gz > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-Providers-macOS-arm64
+          path: provider-delivery/
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          git status --short > provider-diagnostics/status.txt
+          git diff HEAD -- wework > provider-diagnostics/worktree.patch
+          git archive --format=tar.gz HEAD -o provider-diagnostics/source.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provider-arm64-diagnostics
+          path: provider-diagnostics/
+          retention-days: 14
