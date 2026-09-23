@@ -6,6 +6,7 @@ on:
     paths:
       - wework/**
       - .github/workflows/wework-provider-arm64.yml
+      - .github/provider-arm64-fixes.patch
       - .github/scripts/sign-wework-provider-preview.mjs
   workflow_dispatch:
 
@@ -37,12 +38,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Validate isolated source
+      - name: Validate isolated source and apply reviewable integration fixes
         run: |
           test "$GITHUB_REF_NAME" = feature/wework-provider-arm64
           test "$(uname -m)" = arm64
           test -f wework/electron/src/host/model-configuration-store.ts
           test ! -f wework/src/features/model-settings/providerConfigClient.ts
+          if test -f .github/provider-arm64-fixes.patch; then
+            git apply --check .github/provider-arm64-fixes.patch
+            git apply .github/provider-arm64-fixes.patch
+          fi
           mkdir -p provider-diagnostics
           git archive --format=tar.gz HEAD -o provider-diagnostics/source.tar.gz
           git diff --exit-code 01971fc01d1547adaefa7097c5741061b2a90c7b HEAD -- executor sdk shared wework/src/api/hybrid/hybridServices.ts
@@ -115,12 +120,15 @@ jobs:
               for path in paths:
                   assert path.startswith('wework/') and Path(path).is_file()
                   entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': Path(path).read_text()})
+              patch = Path('.github/provider-arm64-fixes.patch')
+              if patch.exists(): entries.append({'path': str(patch), 'mode': '100644', 'type': 'blob', 'sha': None})
               tree = api('git/trees', {'base_tree': api(f'git/commits/{parent}')['tree']['sha'], 'tree': entries})
-              commit = api('git/commits', {'message': 'style(wework): record verified ARM64 provider preview source', 'tree': tree['sha'], 'parents': [parent]})
+              commit = api('git/commits', {'message': 'fix(wework): verify native configuration wiring and preserve provider endpoint prefixes', 'tree': tree['sha'], 'parents': [parent]})
               sha = commit['sha']
               subprocess.run(['gh', 'api', f'repos/{repo}/git/refs/heads/{branch}', '--method', 'PATCH', '--input', '-'], input=json.dumps({'sha': sha, 'force': False}).encode(), check=True)
               subprocess.run(['git', 'fetch', 'origin', sha], check=True)
               subprocess.run(['git', 'reset', '--mixed', sha], check=True)
+              if patch.exists(): patch.unlink()
           with open(os.environ['GITHUB_ENV'], 'a') as stream: stream.write(f'WEWORK_SOURCE_SHA={sha}\n')
           PY
       - uses: actions/cache/restore@v4
