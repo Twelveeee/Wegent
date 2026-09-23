@@ -202,7 +202,7 @@ export class ModelConfigurationStore {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         if (this.lastGood?.config.providers.length)
-          throw new Error('model.yml is missing; restore it before opening')
+          throw new Error('model.yml is missing; restore it before opening', { cause: error })
         await atomicWrite(path, EMPTY_FILE)
       }
       return path
