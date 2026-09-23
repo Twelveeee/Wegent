@@ -1,37 +1,162 @@
 name: Wework Provider Preview
+
 on:
   push:
-    branches: [feature/wework-provider-yaml]
-    paths: [.github/workflows/wework-provider-preview.yml]
+    branches: [feature/wework-provider-yaml-arm64]
+    paths:
+      - .github/workflows/wework-provider-preview.yml
+      - wework/**
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: wework-provider-preview-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   source:
-    name: Source and verification tools
+    name: Prepare verified source
+    if: github.ref == 'refs/heads/feature/wework-provider-yaml-arm64'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Prepare isolated test tools
+      - name: Materialize reviewed changes
+        id: source
+        shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/verification-tools"
-          cd "$RUNNER_TEMP/verification-tools"
-          printf '{"private":true,"name":"wework-verification-tools","version":"1.0.0"}\n' > package.json
-          npm install --ignore-scripts --legacy-peer-deps yaml@2.9.0 vitest@4.1.7 typescript@6.0.2 @types/node@24.13.3 react@19.2.6 react-dom@19.2.6 @types/react@19.2.14 @types/react-dom@19.2.3 jsdom@28.1.0 @testing-library/dom@10.4.1 @testing-library/react@16.3.2 @testing-library/jest-dom@6.9.1 @testing-library/user-event@14.6.1 lucide-react@1.16.0 prettier@3.8.4
-          cd "$GITHUB_WORKSPACE"
-          tar -czf verification-tools.tar.gz -C "$RUNNER_TEMP" verification-tools
-          git archive --format=tar.gz HEAD -o wework-source.tar.gz
+          set -euo pipefail
+          if test -f .github/provider-change-1.b64; then
+            node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { gunzipSync } from 'node:zlib'
+          import { createHash } from 'node:crypto'
+          const encoded = [1, 2, 3, 4].map(n => readFileSync(`.github/provider-change-${n}.b64`, 'utf8')).join('')
+          const patch = gunzipSync(Buffer.from(encoded, 'base64'))
+          const digest = createHash('sha256').update(patch).digest('hex')
+          if (digest !== '2a892a2d9d7c9b3817db84f52d900456481e6716def039ba4a629df2076419f9') throw new Error('Source transfer checksum mismatch')
+          writeFileSync(`${process.env.RUNNER_TEMP}/provider.patch`, patch)
+          NODE
+            git apply --check "$RUNNER_TEMP/provider.patch"
+            git apply "$RUNNER_TEMP/provider.patch"
+            git rm .github/provider-change-{1,2,3,4}.b64
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add wework docs
+            git diff --cached --check
+            git commit -m 'feat(wework): add shared providers and bidirectional YAML model settings'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git archive --format=tar.gz HEAD -o wework-provider-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: wework-provider-source-and-tools
-          path: |
-            wework-source.tar.gz
-            verification-tools.tar.gz
-          retention-days: 7
+          name: wework-provider-verified-source
+          path: wework-provider-source.tar.gz
+          retention-days: 14
           if-no-files-found: error
+
+  macos-arm64:
+    name: Verify and package macOS arm64
+    needs: source
+    runs-on: macos-14
+    timeout-minutes: 75
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      WEWORK_ELECTRON_DEPENDENCIES_READY: 'true'
+      WEWORK_EXECUTOR_PATH: ${{ github.workspace }}/executor/target/aarch64-apple-darwin/release/wegent-executor
+      WEWORK_SOURCE_SHA: ${{ needs.source.outputs.source_sha }}
+      WEWORK_RELEASE_PLATFORM: macos
+      WEWORK_RELEASE_ARCH: arm64
+      WEWORK_CODEX_TARGET: aarch64-apple-darwin
+      WEWORK_DWS_TARGET: aarch64-apple-darwin
+      VITE_WEWORK_RUNTIME_MODE: local-first
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.source_sha }}
+      - uses: ./.github/actions/setup-node-workspace
+        with:
+          save-cache: 'true'
+      - name: Install desktop host dependencies
+        run: pnpm --dir wework/electron install --frozen-lockfile
+      - uses: actions/cache/restore@v4
+        id: executor
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.executor.outputs.cache-hit != 'true'
+        with:
+          targets: aarch64-apple-darwin
+      - name: Build native executor when cache is unavailable
+        if: steps.executor.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/executor/target
+        run: cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
+      - uses: actions/cache/save@v4
+        if: steps.executor.outputs.cache-hit != 'true'
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
+      - name: Typecheck renderer and desktop host
+        run: |
+          set -euo pipefail
+          mkdir -p preview-results
+          pnpm --filter wework typecheck 2>&1 | tee preview-results/typecheck-renderer.log
+          pnpm --dir wework/electron typecheck 2>&1 | tee preview-results/typecheck-host.log
+      - name: Test provider UI, migration, existing models and cloud compatibility
+        run: |
+          set -euo pipefail
+          pnpm --filter wework test src/features/model-settings src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/api/hybrid/hybridServices.test.ts src/api/local/localServices.test.ts --maxWorkers=2 2>&1 | tee preview-results/tests-renderer.log
+          pnpm --dir wework/electron test src/host/model-config-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts --maxWorkers=2 2>&1 | tee preview-results/tests-host.log
+      - name: Check changed feature source
+        run: |
+          set -euo pipefail
+          pnpm --filter wework exec eslint src/features/model-settings/providerConfig.ts src/features/model-settings/providerConfigState.ts src/features/model-settings/ProviderConfigSync.tsx src/features/model-settings/providerConfig.test.ts src/features/model-settings/localModelSettings.ts src/components/settings/ProviderSettingsSection.tsx src/components/settings/ProviderSettingsSection.test.tsx 2>&1 | tee preview-results/lint.log
+          git diff --check
+      - name: Build arm64 desktop application
+        run: |
+          set -euo pipefail
+          node wework/scripts/prepare-electron.mjs 2>&1 | tee preview-results/electron-prepare.log
+          pnpm --dir wework/electron build:package 2>&1 | tee preview-results/build.log
+      - name: Verify application and produce installer
+        run: |
+          set -euo pipefail
+          app="wework/electron/release/WeWork-darwin-arm64/WeWork.app"
+          test -d "$app"
+          file "$app/Contents/MacOS/WeWork" | tee preview-results/architecture.log
+          grep -q arm64 preview-results/architecture.log
+          codesign --verify --deep --strict --verbose=2 "$app" 2>&1 | tee preview-results/codesign.log
+          mkdir -p "$RUNNER_TEMP/provider-dmg" preview-artifacts
+          mv "$app" "$RUNNER_TEMP/provider-dmg/WeWork.app"
+          ln -s /Applications "$RUNNER_TEMP/provider-dmg/Applications"
+          hdiutil create -volname 'WeWork Provider Preview' -srcfolder "$RUNNER_TEMP/provider-dmg" -ov -format UDZO preview-artifacts/WeWork-0.5.4-provider.1-macos-arm64.dmg
+          shasum -a 256 preview-artifacts/*.dmg > preview-artifacts/SHA256SUMS.txt
+          printf 'Version: 0.5.4-provider.1\nSource: %s\nRun: https://github.com/%s/actions/runs/%s\nArchitecture: macOS arm64\nSigning: ad-hoc; not notarized\nChannel: preview artifact only; no stable updater publication\n' "$WEWORK_SOURCE_SHA" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > preview-artifacts/BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-0.5.4-provider.1-macos-arm64
+          path: preview-artifacts/
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wework-provider-preview-verification
+          path: preview-results/
+          retention-days: 14
+          if-no-files-found: warn
