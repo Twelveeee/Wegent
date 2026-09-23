@@ -1,0 +1,28 @@
+--- a/wework/electron/src/host/provider-config-store.ts
++++ b/wework/electron/src/host/provider-config-store.ts
+@@ -249,14 +249,14 @@
+   if (!mutation || typeof mutation !== 'object') throw invalid()
+   if (mutation.kind === 'import-providers') {
+     if (!Array.isArray(mutation.providers)) throw invalid()
+-    for (const provider of mutation.providers) yaml.addIn(['providers'], provider)
++    for (const provider of mutation.providers) yaml.addIn(['providers'], yaml.createNode(provider))
+     return
+   }
+   const providerId = mutation.kind === 'save-provider' ? mutation.provider?.id : mutation.providerId
+   const index = config.providers.findIndex(item => item.id === providerId)
+   if (mutation.kind === 'save-provider') {
+     if (!mutation.provider || typeof mutation.provider !== 'object') throw invalid()
+-    if (index < 0) yaml.addIn(['providers'], { ...mutation.provider, models: [] })
++    if (index < 0) yaml.addIn(['providers'], yaml.createNode({ ...mutation.provider, models: [] }))
+     else {
+       patchFields(yaml, ['providers', index], mutation.provider as unknown as Record<string, unknown>, ['name', 'base_url', 'api_format', 'request_path', 'models_path', 'enabled'])
+       if (mutation.provider.api_key !== undefined) {
+@@ -275,7 +275,7 @@
+     const ids = config.providers[index].models.map(model => model.id)
+     for (const model of mutation.models) {
+       const modelIndex = ids.indexOf(model.id)
+-      if (modelIndex < 0) { yaml.addIn(['providers', index, 'models'], model); ids.push(model.id) }
++      if (modelIndex < 0) { yaml.addIn(['providers', index, 'models'], yaml.createNode(model)); ids.push(model.id) }
+       else patchFields(yaml, ['providers', index, 'models', modelIndex], model as unknown as Record<string, unknown>, ['model_id', 'display_name', 'enabled', 'api_format', 'request_path', 'settings'])
+     }
+   } else if (mutation.kind === 'delete-model') {
