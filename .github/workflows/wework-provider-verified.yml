@@ -19,31 +19,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Materialize and verify source
+      - name: Record source revision
         id: source
         run: |
-          set -euo pipefail
-          if [[ -f .github/provider-source.part01 ]]; then
-            node --input-type=module <<'NODE'
-          import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
-          import { createHash } from 'node:crypto'
-          const parts = readdirSync('.github').filter(name => /^provider-source\.part\d\d$/.test(name)).sort()
-          if (parts.length !== 14) throw new Error('Incomplete source transfer')
-          const patch = Buffer.concat(parts.map(name => readFileSync('.github/' + name)))
-          if (createHash('sha256').update(patch).digest('hex') !== 'f96a3c334df14c9201d71d22244441b2a50f5756ca54f7fecc62cabf687165f6') throw new Error('Source checksum mismatch')
-          writeFileSync(process.env.RUNNER_TEMP + '/source.patch', patch)
-          NODE
-            git apply --check "$RUNNER_TEMP/source.patch"
-            git apply "$RUNNER_TEMP/source.patch"
-            node .github/scripts/finalize-provider-source.mjs
-            git rm --ignore-unmatch .github/provider-source.part* .github/provider-preview.patch.part1
-            if [[ -d .github/provider-preview ]]; then git rm -r .github/provider-preview; fi
-            git add wework
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'feat(wework): implement shared Provider and YAML model configuration [skip ci]'
-            git push origin HEAD:feature/wework-provider-yaml-verified
-          fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git archive --format=tar.gz HEAD -o "$RUNNER_TEMP/verified-source.tar.gz"
       - uses: actions/upload-artifact@v4
@@ -92,15 +70,13 @@ jobs:
       - uses: ./.github/actions/setup-node-workspace
         with:
           save-cache: 'true'
-      - run: pnpm --dir wework/electron install --frozen-lockfile
+      - id: dependencies
+        run: |
+          pnpm --dir wework/electron install --frozen-lockfile
+          mkdir -p "$RUNNER_TEMP/provider-diagnostics"
       - name: Format and preserve reviewable code
         run: |
-          node --input-type=module <<'NODE'
-          import { execFileSync } from 'node:child_process'
-          import { resolve } from 'node:path'
-          const files = execFileSync('git', ['diff', '--name-only', '01971fc01d1547adaefa7097c5741061b2a90c7b', 'HEAD', '--', 'wework'], { encoding: 'utf8' }).trim().split('\n').filter(path => /\.(tsx?|json|ya?ml|md)$/.test(path))
-          execFileSync('pnpm', ['--filter', 'wework', 'exec', 'prettier', '--write', ...files.map(path => resolve(path))], { stdio: 'inherit' })
-          NODE
+          node .github/scripts/verify-provider-source.mjs format
           if ! git diff --quiet -- wework; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -109,21 +85,30 @@ jobs:
             git push origin HEAD:feature/wework-provider-yaml-verified
           fi
       - name: Native configuration regressions
-        run: pnpm --dir wework/electron test src/host/model-configuration-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts --maxWorkers=2
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          pnpm --dir wework/electron test src/host/model-configuration-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts --maxWorkers=2 2>&1 | tee "$RUNNER_TEMP/provider-diagnostics/native-tests.log"
       - name: Provider UI, migration and cloud regressions
-        run: pnpm --filter wework test src/features/model-settings/providerModelConfiguration.test.ts src/features/model-settings/localModelSettings.test.ts src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/api/hybrid/hybridServices.test.ts src/api/local/localServices.test.ts --maxWorkers=2
-      - name: Typecheck renderer and host
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          pnpm --filter wework typecheck
-          pnpm --dir wework/electron typecheck
+          set -o pipefail
+          pnpm --filter wework test src/features/model-settings/providerModelConfiguration.test.ts src/features/model-settings/localModelSettings.test.ts src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/api/hybrid/hybridServices.test.ts src/api/local/localServices.test.ts --maxWorkers=2 2>&1 | tee "$RUNNER_TEMP/provider-diagnostics/renderer-tests.log"
+      - name: Typecheck renderer
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          pnpm --filter wework typecheck 2>&1 | tee "$RUNNER_TEMP/provider-diagnostics/renderer-types.log"
+      - name: Typecheck host
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          pnpm --dir wework/electron typecheck 2>&1 | tee "$RUNNER_TEMP/provider-diagnostics/host-types.log"
       - name: Lint changed source
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          node --input-type=module <<'NODE'
-          import { execFileSync } from 'node:child_process'
-          import { resolve } from 'node:path'
-          const files = execFileSync('git', ['diff', '--name-only', '01971fc01d1547adaefa7097c5741061b2a90c7b', 'HEAD', '--', 'wework'], { encoding: 'utf8' }).trim().split('\n').filter(path => /\.tsx?$/.test(path))
-          execFileSync('pnpm', ['--filter', 'wework', 'exec', 'eslint', ...files.map(path => resolve(path))], { stdio: 'inherit' })
-          NODE
+          set -o pipefail
+          node .github/scripts/verify-provider-source.mjs lint 2>&1 | tee "$RUNNER_TEMP/provider-diagnostics/lint.log"
           pnpm --filter wework lint:typography
           git diff --check
       - name: Archive tested source
@@ -137,6 +122,13 @@ jobs:
             ${{ runner.temp }}/tested-source.tar.gz
             ${{ runner.temp }}/tested-sha.txt
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provider-verification-diagnostics
+          path: ${{ runner.temp }}/provider-diagnostics/
+          retention-days: 14
+          if-no-files-found: warn
   package:
     name: Build macOS arm64 installer
     needs: [source, executor, macos]
