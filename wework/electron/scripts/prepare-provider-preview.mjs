@@ -9,22 +9,23 @@ const execute = promisify(execFile)
 const electronRoot = fileURLToPath(new URL('../', import.meta.url))
 const resources = join(electronRoot, 'resources')
 const magicNumbers = new Set([
-  0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe,
-  0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca,
+  0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca,
 ])
 
 async function machOFiles(directory) {
   const files = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
-    if (entry.isDirectory()) files.push(...await machOFiles(path))
+    if (entry.isDirectory()) files.push(...(await machOFiles(path)))
     else if (entry.isFile()) {
       const handle = await open(path, 'r')
       try {
         const buffer = Buffer.alloc(4)
         const { bytesRead } = await handle.read(buffer, 0, 4, 0)
         if (bytesRead === 4 && magicNumbers.has(buffer.readUInt32BE(0))) files.push(path)
-      } finally { await handle.close() }
+      } finally {
+        await handle.close()
+      }
     }
   }
   return files
@@ -36,8 +37,14 @@ export async function prepareProviderPreview(context) {
   if (context.electronPlatformName !== 'darwin') throw new Error('Provider preview requires macOS')
   for (const path of await machOFiles(resources)) {
     await execute('codesign', [
-      '--force', '--sign', '-', '--timestamp=none', '--options', 'runtime',
-      '--preserve-metadata=entitlements', path,
+      '--force',
+      '--sign',
+      '-',
+      '--timestamp=none',
+      '--options',
+      'runtime',
+      '--preserve-metadata=entitlements',
+      path,
     ])
     await execute('codesign', ['--verify', '--strict', path])
   }
@@ -55,7 +62,7 @@ export async function verifyProviderPreview(context) {
   const manifest = JSON.parse(await readFile(join(packed, 'components.json'), 'utf8'))
   for (const [id, component] of Object.entries(manifest.components)) {
     if (!component.path) continue
-    if (component.sha256 !== await hashComponentPath(join(packed, component.path))) {
+    if (component.sha256 !== (await hashComponentPath(join(packed, component.path)))) {
       throw new Error(`Packaged component integrity mismatch: ${id}`)
     }
   }
