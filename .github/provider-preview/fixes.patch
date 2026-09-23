@@ -26,3 +26,45 @@
        else patchFields(yaml, ['providers', index, 'models', modelIndex], model as unknown as Record<string, unknown>, ['model_id', 'display_name', 'enabled', 'api_format', 'request_path', 'settings'])
      }
    } else if (mutation.kind === 'delete-model') {
+--- a/wework/src/features/model-settings/providerConfig.test.ts
++++ b/wework/src/features/model-settings/providerConfig.test.ts
+@@ -64,6 +64,12 @@
+     expect(projected[0].catalogEntry?.slug).toBe(first.catalogEntry?.slug)
+     expect(projected[0].id).toBe(first.id)
+   })
++  it('retains every legacy alias even when connection and upstream IDs are identical', () => {
++    const models = ['alias-a', 'alias-b', 'alias-c'].map(id => saveLocalModelConfig({ id, modelId: 'same-upstream', baseUrl: 'https://example.invalid/v1', apiKey: 'same-key', displayName: id }))
++    const providers = groupLegacyProviders(models)
++    expect(providers).toHaveLength(3)
++    expect(providers.flatMap(provider => provider.models.map(model => model.id))).toEqual(['alias-a', 'alias-b', 'alias-c'])
++  })
+   it('does not invent custom catalog identities for migrated built-in profiles', () => {
+     const input = structuredClone(snapshot)
+     input.providers[0].models[0].settings = { providerProfileId: 'deepseek', codexCatalogModelId: 'known-catalog-id' }
+--- a/wework/src/features/model-settings/providerConfig.ts
++++ b/wework/src/features/model-settings/providerConfig.ts
+@@ -133,6 +133,7 @@
+ 
+ export function groupLegacyProviders(models: LocalModelConfig[]): ProviderConnection[] {
+   const groups = new Map<string, ProviderConnection>()
++  const providers: ProviderConnection[] = []
+   for (const model of models) {
+     const key = JSON.stringify([model.baseUrl.replace(/\/+$/, ''), model.apiKey ?? '', model.apiFormat, model.requestPath])
+     let provider = groups.get(key)
+@@ -141,6 +142,7 @@
+         base_url: model.baseUrl, api_format: model.apiFormat, request_path: model.requestPath,
+         api_key: model.apiKey ?? '', models: [] }
+       groups.set(key, provider)
++      providers.push(provider)
+     }
+     const settings: Record<string, unknown> = {}
+     for (const field of ['providerProfileId', 'group', 'codexToolCompatibility', 'toolProfile', 'contextWindow', 'webSearchMode', 'imageGenerationEnabled', 'visionModelConfigId', 'codexCatalogModelId', 'catalogEntry'] as const) {
+@@ -148,7 +150,7 @@
+     }
+     provider.models.push({ id: model.id, model_id: model.modelId, display_name: model.displayName, enabled: model.enabled, settings })
+   }
+-  return [...groups.values()]
++  return providers
+ }
+ 
+ export async function migrateLegacyProviderConfig(revision: string): Promise<void> {
