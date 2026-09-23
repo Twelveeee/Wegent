@@ -1,0 +1,163 @@
+name: Wework Provider macOS Build
+
+on:
+  push:
+    branches: [feature/wework-provider-yaml]
+    paths:
+      - .github/workflows/wework-provider-build.yml
+      - .github/provider-preview/**
+      - wework/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wework-provider-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    name: Verify and package macOS arm64
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      WEWORK_ELECTRON_DEPENDENCIES_READY: 'true'
+      VITE_WEWORK_E2E: 'false'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify architecture and materialize staged source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, lzma, subprocess
+          parts = sorted(Path('.github/provider-preview').glob('patch.*.b64'))
+          if parts:
+              source = lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts), validate=True))
+              assert hashlib.sha256(source).hexdigest() == '0bf9a2a3bae81fb728437a958794ffe949a20d37f8ae33effee1ed04864b2309', 'Staged patch checksum mismatch'
+              subprocess.run(['git', 'apply', '--index', '--whitespace=error', '-'], input=source, check=True)
+              fixes = Path('.github/provider-preview/fixes.patch')
+              if fixes.exists():
+                  subprocess.run(['git', 'apply', '--index', '--whitespace=error', str(fixes)], check=True)
+          assert Path('wework/electron/src/host/provider-config-store.ts').is_file(), 'Provider source is missing'
+          PY
+      - name: Set up Node workspace
+        uses: ./.github/actions/setup-node-workspace
+        with:
+          save-cache: 'true'
+      - name: Install Electron dependencies and update its lockfile
+        run: pnpm --dir wework/electron install --no-frozen-lockfile
+      - name: Format and lint changed source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          changed = subprocess.check_output(['git', 'diff', '--name-only', '01971fc01d1547adaefa7097c5741061b2a90c7b', '--', 'wework', 'docs'], text=True).splitlines()
+          files = [str(Path(p).resolve()) for p in changed if Path(p).is_file() and Path(p).suffix in ('.ts', '.tsx', '.json', '.md')]
+          if files:
+              subprocess.run(['pnpm', '--filter', 'wework', 'exec', 'prettier', '--write', *files], check=True)
+          ts = [p for p in files if Path(p).suffix in ('.ts', '.tsx')]
+          if ts:
+              subprocess.run(['pnpm', '--filter', 'wework', 'exec', 'eslint', *ts], check=True)
+          PY
+      - name: Typecheck renderer and host
+        run: |
+          pnpm --filter wework typecheck
+          pnpm --dir wework/electron typecheck
+      - name: Host file and capability regression
+        run: pnpm --dir wework/electron test src/host/provider-config-store.test.ts src/host/secure-value-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts
+      - name: UI, legacy models and cloud merge regression
+        run: |
+          pnpm --filter wework test src/features/model-settings/providerConfig.test.ts src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/features/model-settings/localModelSettings.test.ts src/features/model-settings/localModelProviders.test.ts src/features/model-settings/localModelCatalog.test.ts src/api/hybrid/hybridServices.test.ts src/features/workbench/runtimeModelSelection.test.ts
+      - name: Commit verified source to feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = feature/wework-provider-yaml
+          if test -d .github/provider-preview; then git rm -r .github/provider-preview; fi
+          git add wework docs
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'feat(wework): share provider connections across GUI and YAML configuration'
+            git push origin HEAD:feature/wework-provider-yaml
+          fi
+          echo "WEWORK_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Restore unchanged arm64 executor
+        id: executor
+        uses: actions/cache/restore@v4
+        with:
+          path: executor/target/aarch64-apple-darwin/release/wegent-executor
+          key: provider-executor-arm64-01971fc-v1
+      - name: Set up Rust when executor cache is unavailable
+        if: steps.executor.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: Build executor when cache is unavailable
+        if: steps.executor.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/executor/target
+        run: cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
+      - name: Verify executor source and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code 01971fc01d1547adaefa7097c5741061b2a90c7b -- executor sdk shared
+          EXECUTOR="$GITHUB_WORKSPACE/executor/target/aarch64-apple-darwin/release/wegent-executor"
+          test -x "$EXECUTOR"
+          lipo "$EXECUTOR" -verify_arch arm64
+          echo "WEWORK_EXECUTOR_PATH=$EXECUTOR" >> "$GITHUB_ENV"
+      - name: Prepare Electron binary
+        run: pnpm --filter wework prepare:electron
+      - name: Build production-mode desktop application
+        run: pnpm --dir wework/electron build:package
+      - name: Verify arm64 application and create installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find wework/electron/release -maxdepth 2 -type d -name '*.app' -print -quit)"
+          test -n "$APP"
+          EXE="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP/Contents/Info.plist")"
+          file "$EXE"
+          lipo "$EXE" -verify_arch arm64
+          codesign --verify --deep --strict "$APP"
+          mkdir -p preview-output "$RUNNER_TEMP/provider-dmg"
+          ditto "$APP" "$RUNNER_TEMP/provider-dmg/$(basename "$APP")"
+          ln -s /Applications "$RUNNER_TEMP/provider-dmg/Applications"
+          SHA="$(git rev-parse --short=12 HEAD)"
+          hdiutil create -volname 'WeWork Providers Preview' -srcfolder "$RUNNER_TEMP/provider-dmg" -ov -format UDZO "preview-output/WeWork-Providers-${SHA}-macOS-arm64.dmg"
+          printf 'Source commit: %s\nArchitecture: arm64\nSigning: ad-hoc; not Developer ID signed or notarized\nProduction update channel: not published\n' "$(git rev-parse HEAD)" > preview-output/BUILD-INFO.txt
+          (cd preview-output && shasum -a 256 *.dmg > SHA256SUMS.txt)
+      - name: Upload preview installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: wework-providers-macos-arm64
+          path: preview-output/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Capture source and diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p preview-diagnostics
+          git diff --binary HEAD -- wework docs > preview-diagnostics/worktree.patch
+          git status --short > preview-diagnostics/status.txt
+          printf '%s\n' "$GITHUB_SHA" > preview-diagnostics/trigger-sha.txt
+          tar -czf preview-diagnostics/provider-source.tar.gz --exclude=node_modules --exclude=.git --exclude=target --exclude=release --exclude=resources --exclude=dist --exclude=.package-staging wework docs/zh/wework/provider-file.md docs/en/wework/provider-file.md
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wework-provider-diagnostics
+          path: preview-diagnostics/
+          retention-days: 7
