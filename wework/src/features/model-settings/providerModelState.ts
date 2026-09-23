@@ -11,7 +11,11 @@ export function replaceProviderModelConfigs(next: LocalModelConfig[]): void {
   configurations = next
 }
 
-export function markProviderModelCatalogReady(snapshot: readonly LocalModelCatalogSnapshot[]): void {
+export function markProviderModelCatalogReady(
+  snapshot: readonly LocalModelCatalogSnapshot[]
+): void {
   const versions = new Map(snapshot.map(model => [model.id, model.updatedAt]))
-  configurations = configurations.map(model => versions.get(model.id) === model.updatedAt ? { ...model, catalogReady: true } : model)
+  configurations = configurations.map(model =>
+    versions.get(model.id) === model.updatedAt ? { ...model, catalogReady: true } : model
+  )
 }

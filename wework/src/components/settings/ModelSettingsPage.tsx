@@ -1121,7 +1121,9 @@ function LocalModelSettingsSection({
   onOpenCloudSettings?: () => void
 }) {
   const { t } = useTranslation('common')
-  const [models, setModels] = useState<LocalModelConfig[]>(() => listLocalModelConfigs().filter(model => !model.providerConnectionId))
+  const [models, setModels] = useState<LocalModelConfig[]>(() =>
+    listLocalModelConfigs().filter(model => !model.providerConnectionId)
+  )
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formVisible, setFormVisible] = useState(false)
   const [form, setForm] = useState<LocalModelFormState>(EMPTY_LOCAL_MODEL_FORM)

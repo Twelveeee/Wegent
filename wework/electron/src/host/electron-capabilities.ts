@@ -295,7 +295,12 @@ export function createElectronCapabilityRouter(
   })
   let activeIsolatedClipboardLease: string | null = null
   router.grant(WEWORK_APP_PRINCIPAL, coreGrantedCapabilities())
-  registerModelConfigurationCapabilities(router, window, desktopServices.secureStorage, desktopServices.events)
+  registerModelConfigurationCapabilities(
+    router,
+    window,
+    desktopServices.secureStorage,
+    desktopServices.events
+  )
   registerMicrophoneDiagnostics(router, readMacosMicrophoneChecks)
 
   router.register('navigation.pendingSchemes', () => desktopServices.pendingSchemes.read())
