@@ -1,0 +1,102 @@
++  const available = isElectronRuntime()
++
++  useEffect(() => {
++    if (available) void initializeProviderModelConfiguration()
++    const refresh = () => setLegacyCount(listLegacyLocalModelConfigs().length)
++    window.addEventListener(LOCAL_MODEL_SETTINGS_CHANGED_EVENT, refresh)
++    return () => window.removeEventListener(LOCAL_MODEL_SETTINGS_CHANGED_EVENT, refresh)
++  }, [available])
++
++  if (!available) return null
++
++  async function perform(action: () => Promise<void>) {
++    setPending(true)
++    setError(null)
++    try { await action() } catch (failure) { setError(failure instanceof Error ? failure.message : t('failed')) }
++    finally { setPending(false) }
++  }
++
++  const addProvider = () => {
++    if (!snapshot) return
++    setEditor({ snapshot, provider: { id: `provider-${crypto.randomUUID()}`, name: t('newProvider'), base_url: '', api_format: 'openai-responses', models: [] } })
++  }
++  const editProvider = (provider: PublicModelProvider) => {
++    if (snapshot) setEditor({ snapshot, provider: structuredClone(provider) })
++  }
++
++  return (
++    <section data-testid="provider-settings-section" className="space-y-4">
++      <div className="flex flex-wrap items-start justify-between gap-3">
++        <div className="min-w-0">
++          <h3 className="heading-small text-text-primary">{t('title')}</h3>
++          <p className="mt-1 text-sm text-text-secondary">{t('description')}</p>
++        </div>
++        <button type="button" data-testid="provider-add" className={PRIMARY} disabled={!snapshot || pending || !!editor || !!loadError} onClick={addProvider}>
++          <Plus className="h-4 w-4" />{t('addProvider')}
++        </button>
++      </div>
++      <div className="space-y-2 rounded-lg bg-surface p-3">
++        <p className="break-all font-mono text-xs text-text-secondary" data-testid="provider-file-path">{snapshot?.path ?? t('loading')}</p>
++        <div className="flex flex-wrap gap-2">
++          <button type="button" className={BUTTON} data-testid="provider-file-choose" disabled={pending || !!editor} onClick={() => setConfirmation({ title: t('chooseFile'), description: t('chooseDescription'), run: chooseProviderConfiguration })}>
++            <FileCode2 className="h-4 w-4" />{t('chooseFile')}
++          </button>
++          <button type="button" className={BUTTON} data-testid="provider-file-open" disabled={pending || !!editor} onClick={() => void perform(async () => { await invokeDesktopHost('modelConfiguration.open') })}>{t('openFile')}</button>
++          <button type="button" className={BUTTON} data-testid="provider-file-reload" disabled={pending || !!editor} onClick={() => void perform(reloadProviderConfiguration)}>
++            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{t('reload')}
++          </button>
++          {legacyCount > 0 && <button type="button" className={BUTTON} data-testid="provider-migrate" disabled={!snapshot || pending || !!editor || !!loadError} onClick={() => setConfirmation({ title: t('migrate'), description: t('migrateDescription', { count: legacyCount }), run: async () => { if (snapshot) await migrateLegacyProviderModels(snapshot) } })}>{t('migrateCount', { count: legacyCount })}</button>}
++        </div>
++        <p className="text-xs text-text-secondary">{t('fileHint')}</p>
++      </div>
++      {(error || loadError) && <p role="alert" data-testid="provider-settings-error" className="break-words text-sm text-red-500">{error || loadError}</p>}
++      {editor ? (
++        <ProviderEditor key={editor.provider.id} initial={editor.provider} snapshot={editor.snapshot} onClose={() => setEditor(null)} />
++      ) : (
++        <div className="divide-y divide-border">
++          {snapshot?.providers.map(provider => (
++            <details key={provider.id} data-testid={`provider-row-${provider.id}`} className="py-3" open>
++              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
++                <div className="flex min-w-0 items-center gap-2">
++                  <ChevronDown className="h-4 w-4 shrink-0" />
++                  <span className="truncate text-sm font-medium text-text-primary">{provider.name}</span>
++                  <span className="text-xs text-text-secondary">{t('modelCount', { count: provider.models.length })}</span>
++                  {provider.enabled === false && <span className="text-xs text-text-secondary">{t('disabled')}</span>}
++                </div>
++                <div className="flex gap-2">
++                  <button type="button" className={BUTTON} data-testid={`provider-edit-${provider.id}`} disabled={pending || !!loadError} onClick={event => { event.preventDefault(); editProvider(provider) }}>{t('edit')}</button>
++                  <button type="button" className={BUTTON} data-testid={`provider-delete-${provider.id}`} disabled={pending || !!loadError} onClick={event => {
++                    event.preventDefault()
++                    if (snapshot) setConfirmation({ title: t('deleteProvider'), description: t('deleteDescription', { name: provider.name, count: provider.models.length }), run: () => saveProviderConfiguration(snapshot.revision, snapshot.providers.filter(item => item.id !== provider.id)) })
++                  }}>{t('delete')}</button>
++                </div>
++              </summary>
++              <div className="mt-2 space-y-1 pl-6">
++                <p className="break-all text-xs text-text-secondary">{provider.base_url} · {provider.api_format} · {provider.api_key_configured ? t('keyConfigured') : t('noKey')}</p>
++                {provider.models.map(model => <div key={model.id} className="flex min-h-8 flex-wrap items-center justify-between gap-2 text-sm" data-testid={`provider-model-${model.id}`}>
++                  <span className="text-text-primary">{model.display_name || model.model_id}</span>
++                  <span className="break-all font-mono text-xs text-text-secondary">{model.model_id}{model.enabled === false ? ` · ${t('disabled')}` : ''}</span>
++                </div>)}
++                {provider.models.length === 0 && <p className="text-sm text-text-secondary">{t('emptyModels')}</p>}
++              </div>
++            </details>
++          ))}
++          {snapshot?.providers.length === 0 && <p className="py-4 text-sm text-text-secondary">{t('empty')}</p>}
++        </div>
++      )}
++      <ConfirmDialog open={!!confirmation} title={confirmation?.title ?? ''} description={confirmation?.description ?? ''} cancelLabel={t('cancel')} confirmLabel={t('confirm')} confirmTestId="provider-action-confirm" pending={pending} onClose={() => setConfirmation(null)} onConfirm={() => {
++        if (confirmation) void perform(async () => { await confirmation.run(); setConfirmation(null) })
++      }} />
++    </section>
++  )
++}
++
++function ProviderEditor({ initial, snapshot, onClose }: { initial: ProviderDraft; snapshot: ModelConfigurationSnapshot; onClose: () => void }) {
++  const { t } = useTranslation('modelConnections')
++  const [draft, setDraft] = useState<ProviderDraft>(initial)
++  const [batch, setBatch] = useState('')
++  const [discovered, setDiscovered] = useState<string[]>([])
++  const [selected, setSelected] = useState<Set<string>>(new Set())
++  const [pending, setPending] = useState(false)
++  const [error, setError] = useState<string | null>(null)
++  const [discard, setDiscard] = useState(false)
