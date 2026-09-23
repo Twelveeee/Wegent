@@ -1,0 +1,41 @@
+name: Wework Provider Failure Diagnostics
+on:
+  push:
+    branches: [feature/wework-provider-yaml]
+    paths: [.github/workflows/wework-provider-log-review.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract failed verification diagnostics
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          gh run view 35845485657 --job 107130498168 --log > diagnostics/full.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          lines = Path('diagnostics/full.log').read_text(errors='replace').splitlines()
+          pattern = re.compile(r'(FAIL |failed|AssertionError|Error:|FAILED|fatal:|error:|Test Files|Tests |exit code|hook failed|not fast|rejected)', re.I)
+          selected = set(range(max(0,len(lines)-160),len(lines)))
+          for i,line in enumerate(lines):
+              if pattern.search(line):
+                  selected.update(range(max(0,i-4),min(len(lines),i+14)))
+          text = '\n'.join(f'{i+1}: {lines[i]}' for i in sorted(selected))
+          Path('diagnostics/failures.txt').write_text(text)
+          print(text[-50000:])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wework-provider-failed-log
+          path: diagnostics/
+          retention-days: 7
+          if-no-files-found: error
