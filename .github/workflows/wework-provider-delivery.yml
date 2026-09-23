@@ -1,0 +1,53 @@
+name: WeWork Provider Installer Delivery
+on:
+  push:
+    branches: [feature/wework-provider-yaml-verified]
+    paths: [.github/workflows/wework-provider-delivery.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download the successful verified build
+        uses: actions/download-artifact@v4
+        with:
+          name: WeWork-Provider-Verified-macOS-arm64
+          run-id: 35846100080
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: delivery
+      - name: Verify immutable build provenance and checksums
+        working-directory: delivery
+        run: |
+          set -euo pipefail
+          grep -Fx 'Source: 9802f34ccaa0f980bebed4839002cb03bcaa1437' BUILD-INFO.txt
+          sha256sum --check SHA256SUMS.txt
+          test "$(find . -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
+          test "$(find . -maxdepth 1 -name '*.zip' | wc -l)" -eq 1
+          ls -lh *.dmg *.zip
+      - name: Upload macOS arm64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-Provider-9802f34-DMG
+          path: |
+            delivery/*.dmg
+            delivery/BUILD-INFO.txt
+            delivery/SHA256SUMS.txt
+            delivery/components.json
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload macOS arm64 app ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-Provider-9802f34-App-ZIP
+          path: |
+            delivery/*.zip
+            delivery/BUILD-INFO.txt
+            delivery/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
