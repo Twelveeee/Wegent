@@ -1,0 +1,28 @@
+name: Wework Provider Preview
+
+on:
+  push:
+    branches: [feature/wework-provider-yaml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wework-provider-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive source for reproducible verification
+        run: git archive --format=tar.gz HEAD -o wework-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wework-provider-source
+          path: wework-source.tar.gz
+          retention-days: 7
+          if-no-files-found: error
