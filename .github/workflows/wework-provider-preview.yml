@@ -14,15 +14,24 @@ concurrency:
 
 jobs:
   source:
-    name: Source snapshot
+    name: Source and verification tools
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Archive source for reproducible verification
-        run: git archive --format=tar.gz HEAD -o wework-source.tar.gz
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare isolated test tools
+        run: |
+          mkdir -p verification-tools
+          npm install --prefix verification-tools --ignore-scripts yaml@2.9.0 vitest@4.1.7 typescript@6.0.2 @types/node@24.13.3 react@19.2.6 react-dom@19.2.6 @types/react@19.2.14 @types/react-dom@19.2.3 jsdom@28.1.0 @testing-library/react@16.3.2 @testing-library/jest-dom@6.9.1 @testing-library/user-event@14.6.1 lucide-react@1.16.0 prettier@3.8.4
+          tar -czf verification-tools.tar.gz verification-tools
+          git archive --format=tar.gz HEAD -o wework-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: wework-provider-source
-          path: wework-source.tar.gz
+          name: wework-provider-source-and-tools
+          path: |
+            wework-source.tar.gz
+            verification-tools.tar.gz
           retention-days: 7
           if-no-files-found: error
