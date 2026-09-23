@@ -8,6 +8,7 @@ on:
       - .github/workflows/wework-provider-arm64.yml
       - .github/provider-arm64-fixes.patch
       - .github/scripts/sign-wework-provider-preview.mjs
+      - .github/scripts/fix-provider-editor-lifecycle.mjs
   workflow_dispatch:
 
 permissions:
@@ -67,6 +68,7 @@ jobs:
           pnpm --dir wework/electron install --frozen-lockfile
       - name: Format and identify preview version
         run: |
+          node .github/scripts/fix-provider-editor-lifecycle.mjs
           node wework/scripts/sync-desktop-release-version.mjs 0.5.4-provider.1
           node --input-type=module <<'NODE'
           import { execFileSync } from 'node:child_process'
@@ -87,7 +89,7 @@ jobs:
           set -o pipefail
           pnpm --filter wework typecheck 2>&1 | tee provider-diagnostics/renderer-types.log
           pnpm --dir wework/electron typecheck 2>&1 | tee provider-diagnostics/host-types.log
-          node --input-type=module <<'NODE'
+          node --input-type=module <<'NODE' 2>&1 | tee provider-diagnostics/lint.log
           import { execFileSync } from 'node:child_process'
           import { existsSync } from 'node:fs'
           import { resolve } from 'node:path'
@@ -123,7 +125,7 @@ jobs:
               patch = Path('.github/provider-arm64-fixes.patch')
               if patch.exists(): entries.append({'path': str(patch), 'mode': '100644', 'type': 'blob', 'sha': None})
               tree = api('git/trees', {'base_tree': api(f'git/commits/{parent}')['tree']['sha'], 'tree': entries})
-              commit = api('git/commits', {'message': 'fix(wework): verify native configuration wiring and preserve provider endpoint prefixes', 'tree': tree['sha'], 'parents': [parent]})
+              commit = api('git/commits', {'message': 'fix(wework): verify provider editor lifecycle and native model configuration integration', 'tree': tree['sha'], 'parents': [parent]})
               sha = commit['sha']
               subprocess.run(['gh', 'api', f'repos/{repo}/git/refs/heads/{branch}', '--method', 'PATCH', '--input', '-'], input=json.dumps({'sha': sha, 'force': False}).encode(), check=True)
               subprocess.run(['git', 'fetch', 'origin', sha], check=True)
@@ -185,6 +187,7 @@ jobs:
           git status --short > provider-diagnostics/status.txt
           git diff HEAD -- wework > provider-diagnostics/worktree.patch
           git archive --format=tar.gz HEAD -o provider-diagnostics/source.tar.gz
+          cp wework/src/components/settings/ProviderSettingsSection.tsx provider-diagnostics/ProviderSettingsSection.tsx
       - uses: actions/upload-artifact@v4
         if: always()
         with:
