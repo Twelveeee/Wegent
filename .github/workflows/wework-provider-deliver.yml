@@ -1,0 +1,66 @@
+name: Wework Provider Installer Downloads
+
+on:
+  push:
+    branches: [feature/wework-provider-arm64]
+    paths: [.github/workflows/wework-provider-deliver.yml]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  downloads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download the successfully verified ARM64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: WeWork-Providers-macOS-arm64
+          run-id: 35850856213
+          github-token: ${{ github.token }}
+          path: verified
+      - name: Verify unchanged installer checksums and build identity
+        run: |
+          set -euo pipefail
+          cd verified
+          sha256sum --check SHA256SUMS.txt
+          grep -F 'Source: 228230e8f7833dbd420e8adab12f0d640050ebad' BUILD-INFO.txt
+          grep -F 'Architecture: macOS arm64' BUILD-INFO.txt
+          grep -F 'Version: 0.5.4-provider.1' BUILD-INFO.txt
+          ls -lh *.dmg *.zip
+          test "$(find . -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
+      - name: Upload DMG separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-0.5.4-provider.1-macos-arm64-DMG
+          path: |
+            verified/*.dmg
+            verified/BUILD-INFO.txt
+            verified/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload ZIP separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-0.5.4-provider.1-macos-arm64-ZIP
+          path: |
+            verified/*.zip
+            verified/BUILD-INFO.txt
+            verified/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload source and verification metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-0.5.4-provider.1-source-and-checksums
+          path: |
+            verified/source.tar.gz
+            verified/BUILD-INFO.txt
+            verified/SHA256SUMS.txt
+          retention-days: 30
+          if-no-files-found: error
