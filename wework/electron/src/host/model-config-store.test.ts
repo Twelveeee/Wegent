@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -41,6 +41,7 @@ describe('Provider YAML store', () => {
     store = new ModelConfigStore(directory, secrets)
   })
   afterEach(async () => {
+    vi.unstubAllGlobals()
     await rm(directory, { recursive: true, force: true })
   })
 
@@ -207,5 +208,58 @@ describe('Provider YAML store', () => {
     const snapshot = await store.read()
     await writeFile(snapshot.path, 'version: 1\nproviders: [\n api_key: do-not-display-secret\n')
     await expect(store.read()).rejects.toThrow(/Invalid YAML at line \d+, column \d+/)
+  })
+  it('discovers models through the saved connection without making an inference request', async () => {
+    const document = fixture()
+    document.providers[0].models_path = '/available-models'
+    await store.save({
+      revision: (await store.read()).revision,
+      document,
+      keys: { relay: 'fixture-key' },
+    })
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: 'owner/Exact-Alias' },
+            { id: 'owner/Exact-Alias' },
+            { id: 'second' },
+            { id: '' },
+          ],
+        })
+      )
+    )
+    vi.stubGlobal('fetch', fetcher)
+    expect(await store.discover('relay')).toEqual(['owner/Exact-Alias', 'second'])
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher).toHaveBeenCalledWith('https://example.invalid/v1/available-models', {
+      headers: { Authorization: 'Bearer fixture-key' },
+      redirect: 'error',
+      signal: expect.any(AbortSignal),
+    })
+  })
+
+  it('uses Anthropic discovery authentication and leaves configuration intact on HTTP errors', async () => {
+    const document = fixture()
+    document.providers[0].api_format = 'anthropic-messages'
+    document.providers[0].models_base_url = 'https://list.example.invalid'
+    document.providers[0].models_path = '/v1/models'
+    const saved = await store.save({
+      revision: (await store.read()).revision,
+      document,
+      keys: { relay: 'fixture-key' },
+    })
+    const fetcher = vi.fn().mockResolvedValue(new Response('not a model list', { status: 404 }))
+    vi.stubGlobal('fetch', fetcher)
+    await expect(store.discover('relay')).rejects.toThrow('manual addition is still available')
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://list.example.invalid/v1/models',
+      expect.objectContaining({
+        headers: { 'x-api-key': 'fixture-key', 'anthropic-version': '2023-06-01' },
+        redirect: 'error',
+      })
+    )
+    expect((await store.read()).revision).toBe(saved.revision)
+    expect((await store.runtime()).models).toHaveLength(2)
   })
 })

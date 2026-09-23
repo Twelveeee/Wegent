@@ -63,6 +63,12 @@ await writeFile(
       main: sourcePackage.main,
       dependencies: sourcePackage.dependencies,
       weworkAppId: identity.identifier,
+      ...(process.env.WEWORK_UPDATE_BASE_URL || sourcePackage.weworkUpdateBaseUrl
+        ? {
+            weworkUpdateBaseUrl:
+              process.env.WEWORK_UPDATE_BASE_URL || sourcePackage.weworkUpdateBaseUrl,
+          }
+        : {}),
       ...(identity.executorNamespace
         ? { weworkExecutorNamespace: identity.executorNamespace }
         : {}),

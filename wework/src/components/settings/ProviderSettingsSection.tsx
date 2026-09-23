@@ -82,7 +82,13 @@ export function ProviderSettingsSection() {
   }, [resetDraft])
 
   useEffect(() => {
-    void load()
+    let mounted = true
+    void Promise.resolve().then(() => {
+      if (mounted) void load()
+    })
+    return () => {
+      mounted = false
+    }
   }, [load])
   useEffect(() => {
     const refresh = () => setLegacyCount(listLegacyLocalModelConfigs().length)

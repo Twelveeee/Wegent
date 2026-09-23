@@ -7,6 +7,7 @@ import {
 } from './localModelSettings'
 import { getProviderFileModels, setProviderFileModels } from './providerConfigState'
 import { normalizeLocalModelCatalogEntry } from './localModelCatalog'
+import { builtinCodexCatalogModel } from './codexCatalog'
 export type {
   ProviderApiFormat,
   ProviderDocument,
@@ -42,7 +43,12 @@ export async function loadProviderFileModels(): Promise<void> {
       const previous = new Map(getProviderFileModels().map(model => [model.id, model]))
       const next = result.models.map(raw => {
         const normalized = normalizeStoredLocalModelConfig(raw)
-        const catalogEntry = normalizeLocalModelCatalogEntry(normalized.catalogEntry ?? {}, {
+        const sourceCatalog =
+          raw.catalogEntry ??
+          builtinCodexCatalogModel(normalized.codexCatalogModelId) ??
+          normalized.catalogEntry ??
+          {}
+        const catalogEntry = normalizeLocalModelCatalogEntry(sourceCatalog, {
           id: normalized.id,
           displayName: normalized.displayName,
           toolProfile: normalized.toolProfile,
@@ -143,6 +149,10 @@ export function legacyProviders(): {
       'catalogEntry',
     ] as const) {
       if (model[key] !== undefined) settings[key] = model[key]
+    }
+    if (!model.catalogEntry) {
+      const builtin = builtinCodexCatalogModel(model.codexCatalogModelId)
+      if (builtin) settings.catalogEntry = structuredClone(builtin)
     }
     provider.models.push({
       id: model.id,

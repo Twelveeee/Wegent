@@ -88,4 +88,26 @@ describe('Provider configuration integration', () => {
     await reloadProviderFileModels()
     expect(listLocalModelConfigs().map(model => model.id)).toContain('legacy')
   })
+  it('preserves the built-in capability profile when migrating a preset provider', async () => {
+    const legacy = saveLocalModelConfig({
+      id: 'known-preset',
+      providerProfileId: 'deepseek',
+      modelId: 'deepseek-v4-flash',
+      baseUrl: 'https://api.deepseek.com',
+      apiFormat: 'openai-responses',
+    })
+    const migrated = legacyProviders()
+    const catalog = migrated.providers[0].models[0].settings?.catalogEntry as Record<
+      string,
+      unknown
+    >
+    expect(catalog.supported_reasoning_levels).toBeInstanceOf(Array)
+    expect((catalog.supported_reasoning_levels as unknown[]).length).toBeGreaterThan(0)
+    invoke.mockResolvedValue({ revision: 'preset-preserved', models: [legacy], error: null })
+    await reloadProviderFileModels()
+    expect(getProviderFileModels()[0].catalogEntry?.supported_reasoning_levels).toEqual(
+      catalog.supported_reasoning_levels
+    )
+    expect(getProviderFileModels()[0].codexCatalogModelId).toBe('wework-custom-known-preset')
+  })
 })

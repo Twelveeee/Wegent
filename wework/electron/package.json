@@ -38,5 +38,6 @@
     "semver": "7.8.5",
     "tar": "7.5.22",
     "yaml": "2.9.0"
-  }
+  },
+  "weworkUpdateBaseUrl": "https://github.com/Twelveeee/Wegent/releases/download/wework-provider-preview-updater"
 }
