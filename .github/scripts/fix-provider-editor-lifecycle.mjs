@@ -30,7 +30,7 @@ function walk(node) {
       if (deps.includes('selectedId') && deps.includes('snapshot') && body.includes('setSelectedId(')) {
         assert(!selectionEffect, 'Unexpected duplicate selection effect')
         selectionEffect = true
-        edits.push({ start: node.getStart(source), end: node.end, value: '' })
+        edits.push({ start: node.getStart(source), end: node.end, value: '\n' })
       } else if (deps.length === 1 && /\bset(?:Form|State|Name|Enabled)\(/.test(body)) {
         const dependency = deps[0]
         assert(['provider', 'initial', 'model'].includes(dependency), 'Unexpected form reset dependency')
@@ -41,7 +41,7 @@ function walk(node) {
         const statements = ts.isBlock(callback.body) ? body.slice(1, -1) : body
         edits.push({
           start: node.getStart(source), end: node.end,
-          value: `// Adjust only this component's draft before committing stale input to the DOM.\nconst [${previous}, ${setter}] = useState(${dependency})\nif (${previous} !== ${dependency}) {\n${setter}(${dependency})\n${statements}\n}`,
+          value: `// Adjust only this component's draft before committing stale input to the DOM.\nconst [${previous}, ${setter}] = useState(${dependency})\nif (${previous} !== ${dependency}) {\n${setter}(${dependency})\n${statements}\n}\n`,
         })
       }
     }
@@ -62,5 +62,12 @@ let result = text
 for (const edit of edits.sort((a, b) => b.start - a.start)) {
   result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
 }
+const checked = ts.createSourceFile(path, result, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+assert.equal(checked.parseDiagnostics.length, 0, 'Provider editor transformation must remain syntactically valid')
 writeFileSync(path, result)
 console.log(`Provider editor lifecycle: ${resetCount} guarded draft resets; derived selection ${selectionEffect ? 'updated' : 'already independent of effects'}`)
+
+const storePath = 'wework/electron/src/host/model-configuration-store.ts'
+const storeSource = readFileSync(storePath, 'utf8')
+const symptom = "new Error('model.yml is missing; restore it before opening')"
+writeFileSync(storePath, storeSource.replace(symptom, "new Error('model.yml is missing; restore it before opening', { cause: error })"))
