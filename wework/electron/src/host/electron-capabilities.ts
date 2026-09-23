@@ -1,3 +1,4 @@
+import { registerModelConfigCapabilities } from './model-config-capabilities.js'
 import {
   app,
   BrowserWindow,
@@ -295,6 +296,7 @@ export function createElectronCapabilityRouter(
   let activeIsolatedClipboardLease: string | null = null
   router.grant(WEWORK_APP_PRINCIPAL, coreGrantedCapabilities())
   registerMicrophoneDiagnostics(router, readMacosMicrophoneChecks)
+  registerModelConfigCapabilities(router, app.getPath('userData'), desktopServices.secureStorage, desktopServices.events)
 
   router.register('navigation.pendingSchemes', () => desktopServices.pendingSchemes.read())
   router.register('navigation.acknowledgeScheme', params => {

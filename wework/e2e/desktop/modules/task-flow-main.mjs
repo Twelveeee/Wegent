@@ -1,3 +1,4 @@
+import { verifyProviderConfiguration } from './provider-config-flows.mjs'
 import {
   RealCloudEnvironment,
   verifyLocalExecutorUsesCloudSocketUrl,
@@ -2035,6 +2036,13 @@ source = ${JSON.stringify(staleBundledMarketplacePath)}`
       return
     }
 
+    if (DESKTOP_SEGMENT === 'provider-config') {
+      phase = 'provider-config'
+      await verifyProviderConfiguration(control)
+      console.log(`Wework provider configuration checkpoint passed. Evidence: ${resultDir}`)
+      return
+    }
+
     if (DESKTOP_SEGMENT === 'model-routing' || MODEL_SWITCH_ONLY) {
       phase = 'model-routing-project'
       const projectMenusBeforeModelRouting = new Set(
@@ -2591,6 +2599,12 @@ source = ${JSON.stringify(staleBundledMarketplacePath)}`
       await verifyBackgroundTaskPlanRestoration({ composerSelector, control })
       console.log(`Wework background task-plan E2E passed. Evidence: ${resultDir}`)
       return
+    }
+
+    if (shouldRunDesktopCheckpoint('provider-config')) {
+      phase = 'provider-config'
+      await verifyProviderConfiguration(control)
+      if (shouldStopAfterDesktopCheckpoint('provider-config')) return
     }
 
     if (shouldRunDesktopCheckpoint('model-routing')) {

@@ -1,6 +1,12 @@
 export const HOST_PROTOCOL_VERSION = 1
 
 export const HOST_CAPABILITIES = [
+  'modelConfig.read',
+  'modelConfig.bind',
+  'modelConfig.open',
+  'modelConfig.mutate',
+  'modelConfig.resolve',
+  'modelConfig.discover',
   'app.getVersion',
   'app.quit',
   'app.relaunch',

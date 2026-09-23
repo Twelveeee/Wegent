@@ -1,3 +1,4 @@
+import { ensureProviderModelsLoaded, resolveProviderRuntimeConfig } from '@/features/model-settings/providerConfigClient'
 import { createLocalProjectAutomationApi } from './localProjectAutomations'
 import {
   createRuntimeComposerApi,
@@ -861,20 +862,21 @@ function providerIdFromLocalConfig(config: LocalModelConfig): string {
   return `local-${config.id}`.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'local'
 }
 
-function localVisionSidecarConfig(config: LocalModelConfig): Record<string, unknown> | null {
+async function localVisionSidecarConfig(config: LocalModelConfig): Promise<Record<string, unknown> | null> {
   if (!config.visionModelConfigId) return null
-  const visionModel = listLocalModelConfigs().find(
+  let visionModel = listLocalModelConfigs().find(
     candidate => candidate.id === config.visionModelConfigId
   )
   if (!visionModel?.enabled) {
     throw new Error('Vision proxy model is missing or disabled')
   }
+  visionModel = await resolveProviderRuntimeConfig(visionModel)
   if (!localModelSupportsImageInput(visionModel)) {
     throw new Error('Vision proxy model does not declare image input support')
   }
   return {
     enabled: true,
-    request_url: buildLocalModelRequestUrl(
+    request_url: visionModel.providerRequestUrl ?? buildLocalModelRequestUrl(
       visionModel.baseUrl,
       visionModel.requestPath,
       visionModel.apiFormat
@@ -934,15 +936,17 @@ function wecodeExecutorForRuntime(runtime: string): string {
   return normalized === 'claude' || normalized === 'claudecode' ? 'claudecode' : normalized
 }
 
-function localRuntimeModelConfig(
+async function localRuntimeModelConfig(
   runtime: string,
   requireCodexCatalog: boolean,
   modelName?: string,
   modelType?: string | null,
   modelOptions?: Record<string, string>,
   cloudModelGateway?: CloudModelGateway
-): Record<string, unknown> {
-  const localModel = findLocalModelConfigByModelName(modelName)
+): Promise<Record<string, unknown>> {
+  await ensureProviderModelsLoaded()
+  const selected = isCloudModelType(modelType) ? null : findLocalModelConfigByModelName(modelName)
+  const localModel = selected ? await resolveProviderRuntimeConfig(selected) : null
   if (localModel) {
     if (!localModel.enabled) {
       throw new Error('Local model is disabled')
@@ -950,12 +954,12 @@ function localRuntimeModelConfig(
     if (requireCodexCatalog && !localModel.catalogReady) {
       throw new Error('Local model requires a Codex restart')
     }
-    const requestUrl = buildLocalModelRequestUrl(
+    const requestUrl = localModel.providerRequestUrl ?? buildLocalModelRequestUrl(
       localModel.baseUrl,
       localModel.requestPath,
       localModel.apiFormat
     )
-    const visionSidecar = localVisionSidecarConfig(localModel)
+    const visionSidecar = await localVisionSidecarConfig(localModel)
     const primaryCodexCatalogModelId =
       localModel.codexCatalogModelId || DEFAULT_GPT_56_CATALOG_MODEL_ID
     const nativeCodexTools =
@@ -995,11 +999,11 @@ function localRuntimeModelConfig(
     }
   }
 
-  if (modelName?.startsWith(LOCAL_MODEL_NAME_PREFIX)) {
+  if (!isCloudModelType(modelType) && modelName?.startsWith(LOCAL_MODEL_NAME_PREFIX)) {
     throw new Error('Local model is no longer configured')
   }
 
-  if (modelName?.startsWith(STALE_CODEX_PROVIDER_MODEL_PREFIX)) {
+  if (!isCloudModelType(modelType) && modelName?.startsWith(STALE_CODEX_PROVIDER_MODEL_PREFIX)) {
     throw new Error('Codex config.toml provider is no longer configured')
   }
 
@@ -1099,7 +1103,7 @@ async function harnessProxyUpstream(
   cloudModelGateway?: CloudModelGateway
 ): Promise<Record<string, unknown>> {
   const execution = selectedModelExecutionFields(option.model, option.options)
-  const config = localRuntimeModelConfig(
+  const config = await localRuntimeModelConfig(
     runtime,
     false,
     execution.modelId,
@@ -1335,7 +1339,7 @@ async function buildLocalRuntimeExecutionRequest(
     input.modelConfig ??
     (claudeRuntime && !input.modelId
       ? {}
-      : localRuntimeModelConfig(
+      : await localRuntimeModelConfig(
           input.runtime,
           !claudeRuntime && input.requireLocalCodexCatalog,
           input.modelId,
@@ -1672,7 +1676,7 @@ async function createLocalRuntimeTaskPayload(
     payload.initialSupervisor = {
       ...initialSupervisor,
       modelConfig: await applyRuntimeModelOptions(
-        localRuntimeModelConfig(
+        await localRuntimeModelConfig(
           'codex',
           requireLocalCodexCatalog,
           initialSupervisor.modelSelection.modelName,
@@ -2329,6 +2333,8 @@ export function createRuntimeWorkApiFromIpc(
   const resolveProxy = options.resolveProxy
 
   const prepareRuntimeModel = async (data: RuntimeModelPrepareRequest): Promise<boolean> => {
+    await ensureProviderModelsLoaded()
+    if (isCloudModelType(data.modelType)) return true
     const selectedModel = findLocalModelConfigByModelName(data.modelId)
     if (!options.syncConfiguredModelCatalog) return true
     if (!selectedModel?.catalogEntry) return true
@@ -2770,7 +2776,7 @@ export function createRuntimeWorkApiFromIpc(
         throw modelCatalogSyncCancelled()
       }
       const modelConfig = await applyRuntimeModelOptions(
-        localRuntimeModelConfig(
+        await localRuntimeModelConfig(
           'codex',
           requireLocalCodexCatalog,
           selection.modelName,
@@ -3102,7 +3108,7 @@ export function createRuntimeWorkApiFromIpc(
           throw modelCatalogSyncCancelled()
         }
         modelConfig = await applyRuntimeModelOptions(
-          localRuntimeModelConfig(
+          await localRuntimeModelConfig(
             'codex',
             requireLocalCodexCatalog,
             selection.modelName,
@@ -3628,6 +3634,7 @@ export function createLocalAppServices(deps: LocalAppServicesDeps = {}): Workben
   let rememberedCodexAuthConfigured: boolean | null = null
   const modelApi = {
     listModels: async () => {
+      await ensureProviderModelsLoaded()
       // Always reconcile pending local model catalogs (custom model interfaces)
       // so they appear in the picker even when the Codex subscription is off.
       await ensureStatus()

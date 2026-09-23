@@ -1,3 +1,5 @@
+import { ProviderSettingsSection } from './providers/ProviderSettingsSection'
+import { listLegacyLocalModelConfigs } from '@/features/model-settings/localModelSettings'
 import {
   AlertCircle,
   ChevronDown,
@@ -1120,7 +1122,7 @@ function LocalModelSettingsSection({
   onOpenCloudSettings?: () => void
 }) {
   const { t } = useTranslation('common')
-  const [models, setModels] = useState<LocalModelConfig[]>(() => listLocalModelConfigs())
+  const [models, setModels] = useState<LocalModelConfig[]>(() => listLegacyLocalModelConfigs())
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formVisible, setFormVisible] = useState(false)
   const [form, setForm] = useState<LocalModelFormState>(EMPTY_LOCAL_MODEL_FORM)
@@ -1139,7 +1141,7 @@ function LocalModelSettingsSection({
   const [restartingCatalog, setRestartingCatalog] = useState(false)
 
   const refreshModels = useCallback(() => {
-    setModels(listLocalModelConfigs())
+    setModels(listLegacyLocalModelConfigs())
   }, [])
 
   useEffect(() => {
@@ -2823,10 +2825,13 @@ function ModelInterfaceSettingsSection({
   onOpenCloudSettings?: () => void
 }) {
   return (
-    <LocalModelSettingsSection
-      cloudConnection={cloudConnection}
-      onOpenCloudSettings={onOpenCloudSettings}
-    />
+    <div className="grid gap-6">
+      <ProviderSettingsSection />
+      <LocalModelSettingsSection
+        cloudConnection={cloudConnection}
+        onOpenCloudSettings={onOpenCloudSettings}
+      />
+    </div>
   )
 }
 

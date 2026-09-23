@@ -31,6 +31,7 @@ export const DESKTOP_CHECKPOINTS = [
   'plugin-account-auth',
   'plugin-workspace-publication',
   'project-ai-settings',
+  'provider-config',
   'model-routing',
   'fork-provider-preservation',
   'codex-account-login',

@@ -1,3 +1,4 @@
+import { getProviderModelConfigs, isMigratedProviderModel, isProviderModel, markProviderModelsReady } from './providerConfigState'
 import {
   createDefaultLocalModelCatalogEntry,
   type LocalModelCatalogEntry,
@@ -12,6 +13,8 @@ export const DEEPSEEK_V4_CONTEXT_WINDOW = 1_048_576
 
 export interface LocalModelConfig {
   id: string
+  providerConnectionId?: string
+  providerRequestUrl?: string
   providerProfileId?: string
   displayName: string
   group?: string
@@ -456,11 +459,23 @@ function nextLocalModelUpdatedAt(previous?: LocalModelConfig): string {
   return new Date(timestamp).toISOString()
 }
 
+export function listLegacyLocalModelConfigs(): LocalModelConfig[] {
+  return readStoredConfigs().filter(config => !isMigratedProviderModel(config.id) && !isProviderModel(config.id))
+}
+
 export function listLocalModelConfigs(): LocalModelConfig[] {
-  return readStoredConfigs()
+  return [...listLegacyLocalModelConfigs(), ...getProviderModelConfigs()]
+}
+
+export function retireMigratedLocalModelConfigs(ids: readonly string[]): void {
+  const migrated = new Set(ids)
+  const stored = readStoredConfigs()
+  const retained = stored.filter(config => !migrated.has(config.id))
+  if (retained.length !== stored.length) writeStoredConfigs(retained)
 }
 
 export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalModelConfig {
+  if (input.id && isProviderModel(input.id)) throw new Error('Edit this model through its Provider or bound YAML file')
   const modelId = normalizeLocalModelId(input.modelId)
   const apiFormat = normalizeLocalModelApiFormat(input.apiFormat)
   const splitUrl = splitLocalModelRequestUrl(input.baseUrl, input.requestPath, apiFormat)
@@ -572,6 +587,7 @@ export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalMod
 }
 
 export function markLocalModelCatalogReady(snapshot: readonly LocalModelCatalogSnapshot[]): void {
+  markProviderModelsReady(snapshot)
   const writtenVersions = new Map(snapshot.map(model => [model.id, model.updatedAt]))
   const configs = readStoredConfigs().map(config => {
     if (writtenVersions.get(config.id) !== config.updatedAt) return config
@@ -603,6 +619,7 @@ export function reconcileLocalModelCatalogRuntime(runtimeInstanceId?: string): v
 }
 
 export function deleteLocalModelConfig(id: string): boolean {
+  if (isProviderModel(id)) throw new Error('Delete this model through its Provider or bound YAML file')
   const configs = readStoredConfigs()
   const next = configs
     .filter(config => config.id !== id)
@@ -639,7 +656,7 @@ export function findLocalModelConfigByModelName(
   modelName?: string | null
 ): LocalModelConfig | null {
   const id = localModelIdFromModelName(modelName)
-  const configs = readStoredConfigs()
+  const configs = listLocalModelConfigs()
   if (id) return configs.find(config => config.id === id) ?? null
   if (!modelName) return null
   return (
