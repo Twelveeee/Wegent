@@ -1,0 +1,144 @@
+diff --git a/wework/docs/provider-models.md b/wework/docs/provider-models.md
+new file mode 100644
+index 0000000..fd2dcf8
+--- /dev/null
++++ b/wework/docs/provider-models.md
+@@ -0,0 +1,37 @@
++# Provider connections and model.yml
++
++## 中文
++
++模型设置新增“本地服务连接”。先添加连接，再批量粘贴模型 ID 或获取模型列表；地址与 Key 只填写一次。页面保存与 `model.yml` 读取使用同一份配置，云端下发模型、原有 Codex 账号及云端执行权限保持独立。
++
++默认文件为应用用户数据目录下 `model-connections/model.yml`。可选择自定义 YAML 文件、打开文件编辑，保存后点击“重新加载”。当前版本不自动监听外部文件变化。页面保存采用文件版本检查及原子写入；外部编辑冲突不会被覆盖。无效文件保留上一份有效配置并报错。
++
++```yaml
++version: 1
++providers:
++  - id: relay
++    name: 我的中转
++    base_url: https://gateway.example/v1
++    api_format: openai-responses
++    # Key 可在页面填写，保存后改为本机安全凭据引用。
++    models:
++      - id: coding
++        model_id: upstream-model-id
++        display_name: 主力编程
++```
++
++支持 `openai-responses`、`openai-chat-completions`、`anthropic-messages`。模型默认继承连接协议，也可以用 `api_format` / `request_path` 单独覆盖。模型 `id` 是稳定的本地身份，`model_id` 是发给上游的标识；改名称时不要更改 `id`。可用模型级 `catalog_entry` 保留高级能力配置。模型列表可设置 `models_path`，默认 `/models`；列表不可用时仍可手动添加，获取列表不代表已验证工具调用能力。
++
++“迁移旧模型”先持久化 Provider 配置，再清除对应旧记录，并保留已有模型 ID 与能力配置。迁移按地址、Key、协议和路径分组，不按模型品牌合并。云端目录不会被迁移或写入文件。
++
++页面不回显完整 Key，不把新 Key 写入 localStorage。页面保存时使用已有桌面安全存储，YAML 中记录 `api_key_ref`。文件也支持显式 `api_key`，但这是明文，不要提交或分享；下次页面保存会将它换为本机凭据引用。凭据引用不能在另一台机器直接使用，需要重新录入 Key。
++
++更改自定义模型能力后，沿用现有 Codex catalog 写入与空闲重启/确认机制。不会因为加载文件就上传全部连接或强制中断正在运行的任务。删除正在引用的模型时保留历史任务身份，重新执行需要选择可用模型。
++
++## English
++
++Local Provider connections share one endpoint and credential across multiple models. The settings page and the bound YAML file use the same native configuration service. Cloud catalogs, Codex account sources and remote execution permissions remain separate.
++
++Use **Choose YAML**, **Open file**, and **Reload** to maintain a file. External changes require an explicit reload in this version. Stale form saves are rejected; malformed files retain the encrypted last-known-good snapshot. Files are written atomically with owner-only permissions; model IDs survive migration and renames.
++
++The UI stores keys in the existing native secure value store and writes `api_key_ref` into YAML. Explicit inline `api_key` is supported for local editing but must never be committed or shared. References are machine-local. Discovery lists candidates only; it does not verify inference or tool execution. Existing catalog synchronization and restart confirmation are retained.
+diff --git a/wework/electron/package.json b/wework/electron/package.json
+index 35def67..bbc61c2 100644
+--- a/wework/electron/package.json
++++ b/wework/electron/package.json
+@@ -36,6 +36,7 @@
+     "electron-updater": "6.8.9",
+     "extract-zip": "2.0.1",
+     "semver": "7.8.5",
+-    "tar": "7.5.22"
++    "tar": "7.5.22",
++    "yaml": "2.9.0"
+   }
+ }
+diff --git a/wework/electron/pnpm-lock.yaml b/wework/electron/pnpm-lock.yaml
+index 4932d0a..7d5f718 100644
+--- a/wework/electron/pnpm-lock.yaml
++++ b/wework/electron/pnpm-lock.yaml
+@@ -34,6 +34,9 @@ importers:
+       tar:
+         specifier: 7.5.22
+         version: 7.5.22
++      yaml:
++        specifier: 2.9.0
++        version: 2.9.0
+     devDependencies:
+       '@electron/packager':
+         specifier: 20.3.0
+@@ -1816,6 +1819,12 @@ packages:
+     resolution: {integrity: sha512-dSvYKdvLsAHCDqPOhIwk/q5CvuWtTB3Dgpoe0uVEFjTzIOAmsQpprX25InCvrvJsirEbu1OHyy67n/kAj1Sw/w==}
+     engines: {node: '>=18'}
+ 
++  yaml@2.9.0:
++    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
++    engines: {node: '>= 14.6'}
++    hasBin: true
++
++
+ snapshots:
+ 
+   '@electron-internal/extract-zip@1.0.5': {}
+@@ -3634,3 +3643,5 @@ snapshots:
+       compress-commons: 7.0.1
+       normalize-path: 3.0.0
+       readable-stream: 4.7.0
++
++  yaml@2.9.0: {}
+diff --git a/wework/electron/src/host/capability-router.ts b/wework/electron/src/host/capability-router.ts
+index 1a490e9..f017805 100644
+--- a/wework/electron/src/host/capability-router.ts
++++ b/wework/electron/src/host/capability-router.ts
+@@ -98,6 +98,12 @@ export const HOST_CAPABILITIES = [
+   'maintenance.cleanupTemporaryImages',
+   'maintenance.getSystemPressure',
+   'notification.show',
++  'modelConfiguration.read',
++  'modelConfiguration.runtime',
++  'modelConfiguration.save',
++  'modelConfiguration.choose',
++  'modelConfiguration.open',
++  'modelConfiguration.discover',
+   'preferences.get',
+   'preferences.update',
+   'rendererStorage.initialize',
+diff --git a/wework/electron/src/host/electron-capabilities.ts b/wework/electron/src/host/electron-capabilities.ts
+index 3436352..4a9648f 100644
+--- a/wework/electron/src/host/electron-capabilities.ts
++++ b/wework/electron/src/host/electron-capabilities.ts
+@@ -1,3 +1,4 @@
++import { registerModelConfigurationCapabilities } from './model-configuration-capabilities.js'
+ import {
+   app,
+   BrowserWindow,
+@@ -294,6 +295,7 @@ export function createElectronCapabilityRouter(
+   })
+   let activeIsolatedClipboardLease: string | null = null
+   router.grant(WEWORK_APP_PRINCIPAL, coreGrantedCapabilities())
++  registerModelConfigurationCapabilities(router, window, desktopServices.secureStorage, desktopServices.events)
+   registerMicrophoneDiagnostics(router, readMacosMicrophoneChecks)
+ 
+   router.register('navigation.pendingSchemes', () => desktopServices.pendingSchemes.read())
+@@ -1119,6 +1121,7 @@ export function createWorkbenchCapabilityRouter(
+       }),
+     }
+   })
++  registerModelConfigurationCapabilities(router, window, desktopServices.secureStorage, desktopServices.events)
+   registerMicrophoneDiagnostics(router, readMacosMicrophoneChecks)
+   router.grant(WEWORK_WORKBENCH_PRINCIPAL, [
+     ...WORKBENCH_ONLY_CAPABILITIES,
+diff --git a/wework/electron/src/host/model-configuration-capabilities.ts b/wework/electron/src/host/model-configuration-capabilities.ts
+new file mode 100644
+index 0000000..dc96132
+--- /dev/null
++++ b/wework/electron/src/host/model-configuration-capabilities.ts
+@@ -0,0 +1,42 @@
++import { app, dialog, shell, type BrowserWindow } from 'electron'
++import { join } from 'node:path'
++import type { HostCapabilityRouter } from './capability-router.js'
++import type { DesktopHostEventBroker } from './desktop-host-events.js'
++import type { SecureValueStore } from './secure-value-store.js'
++import { ModelConfigurationStore } from './model-configuration-store.js'
++
