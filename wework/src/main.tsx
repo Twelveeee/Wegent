@@ -6,6 +6,7 @@ import '@xyflow/react/dist/style.css'
 import '@wegent/collaboration/styles.css'
 import './styles/globals.css'
 import App from './App.tsx'
+import { initializeProviderConfig } from '@/features/model-settings/providerConfig'
 import { installAppLogging } from './lib/app-logging'
 import { installDebugPanelLogCapture } from './lib/debugPanel'
 import { installDeveloperCommandMenu } from './lib/developerCommandMenu'
@@ -136,6 +137,7 @@ async function mountWework(container: HTMLElement, context: Context | null): Pro
     renderStartupFailure(container, storageError)
     return () => {}
   }
+  const stopProviderConfig = await initializeProviderConfig()
   if (!isSystemDragPanel) {
     logRendererStartupStep('automation-bridge-install', 'started')
     try {
@@ -151,8 +153,12 @@ async function mountWework(container: HTMLElement, context: Context | null): Pro
   try {
     const unmount = await mountApp(container, context)
     logRendererStartupStep('wework-mount', 'completed')
-    return unmount
+    return () => {
+      stopProviderConfig()
+      unmount()
+    }
   } catch (error) {
+    stopProviderConfig()
     renderStartupFailure(container, error)
     return () => {}
   }

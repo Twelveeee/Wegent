@@ -1,6 +1,8 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
+import enProviders from './locales/en/providers.json'
+import zhProviders from './locales/zh-CN/providers.json'
 import enCommon from './locales/en/common.json'
 import zhCommon from './locales/zh-CN/common.json'
 import enChat from './locales/en/chat.json'
@@ -23,6 +25,7 @@ i18n
   .init({
     resources: {
       en: {
+        providers: enProviders,
         chat: enChat,
         common: enCommon,
         localRuntime: enLocalRuntime,
@@ -31,6 +34,7 @@ i18n
         ...(extensionI18nResources.en ?? {}),
       },
       'zh-CN': {
+        providers: zhProviders,
         chat: zhChat,
         common: zhCommon,
         localRuntime: zhLocalRuntime,
@@ -43,7 +47,7 @@ i18n
     fallbackLng: 'zh-CN',
     supportedLngs: ['zh-CN', 'en'],
     defaultNS: 'common',
-    ns: ['common', 'chat', 'localRuntime', 'sites', 'hooks', ...extensionNamespaces],
+    ns: ['common', 'chat', 'localRuntime', 'sites', 'hooks', 'providers', ...extensionNamespaces],
     interpolation: { escapeValue: false },
   })
 

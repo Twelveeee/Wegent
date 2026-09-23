@@ -30,6 +30,7 @@ import type { BrowserBounds, EmbeddedBrowserManager } from './embedded-browser-m
 import type { ComputerUseService } from './computer-use-service.js'
 import { LocalAttachmentStore } from './local-attachment-store.js'
 import { readLocalFileChunk } from './local-file-reader.js'
+import { registerProviderConfigCapabilities } from './provider-config-capabilities.js'
 import { registerWorkspaceFileActions } from './workspace-file-actions.js'
 import { getElectronProcessSnapshot } from './process-diagnostics.js'
 import { sendE2EKey, sendE2EText, type E2EKeyPhase } from './e2e-keyboard.js'
@@ -295,6 +296,7 @@ export function createElectronCapabilityRouter(
   let activeIsolatedClipboardLease: string | null = null
   router.grant(WEWORK_APP_PRINCIPAL, coreGrantedCapabilities())
   registerMicrophoneDiagnostics(router, readMacosMicrophoneChecks)
+  registerProviderConfigCapabilities(router, desktopServices.secureStorage, desktopServices.events)
 
   router.register('navigation.pendingSchemes', () => desktopServices.pendingSchemes.read())
   router.register('navigation.acknowledgeScheme', params => {

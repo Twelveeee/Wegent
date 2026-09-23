@@ -1,3 +1,4 @@
+import { listProviderModelConfigs, markProviderModelCatalogReady } from './providerModelCache'
 import {
   createDefaultLocalModelCatalogEntry,
   type LocalModelCatalogEntry,
@@ -11,6 +12,7 @@ export const DEEPSEEK_V4_PRO_MODEL_ID = 'deepseek-v4-pro'
 export const DEEPSEEK_V4_CONTEXT_WINDOW = 1_048_576
 
 export interface LocalModelConfig {
+  providerConnectionId?: string
   id: string
   providerProfileId?: string
   displayName: string
@@ -311,7 +313,14 @@ function dispatchChanged(configs: LocalModelConfig[]): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(
     new CustomEvent(LOCAL_MODEL_SETTINGS_CHANGED_EVENT, {
-      detail: { configs: configs.map(redactLocalModelConfig) },
+      detail: {
+        configs: [
+          ...configs.filter(
+            config => !listProviderModelConfigs().some(item => item.id === config.id)
+          ),
+          ...listProviderModelConfigs(),
+        ].map(redactLocalModelConfig),
+      },
     })
   )
 }
@@ -456,8 +465,23 @@ function nextLocalModelUpdatedAt(previous?: LocalModelConfig): string {
   return new Date(timestamp).toISOString()
 }
 
-export function listLocalModelConfigs(): LocalModelConfig[] {
+export function listLegacyLocalModelConfigs(): LocalModelConfig[] {
   return readStoredConfigs()
+}
+
+export function removeMigratedLocalModelConfigs(ids: readonly string[]): void {
+  const removed = new Set(ids)
+  writeStoredConfigs(readStoredConfigs().filter(config => !removed.has(config.id)))
+}
+
+export function notifyLocalModelConfigsChanged(): void {
+  dispatchChanged(readStoredConfigs())
+}
+
+export function listLocalModelConfigs(): LocalModelConfig[] {
+  const managed = listProviderModelConfigs()
+  const ids = new Set(managed.map(config => config.id))
+  return [...readStoredConfigs().filter(config => !ids.has(config.id)), ...managed]
 }
 
 export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalModelConfig {
@@ -572,6 +596,7 @@ export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalMod
 }
 
 export function markLocalModelCatalogReady(snapshot: readonly LocalModelCatalogSnapshot[]): void {
+  markProviderModelCatalogReady(snapshot)
   const writtenVersions = new Map(snapshot.map(model => [model.id, model.updatedAt]))
   const configs = readStoredConfigs().map(config => {
     if (writtenVersions.get(config.id) !== config.updatedAt) return config
@@ -639,7 +664,7 @@ export function findLocalModelConfigByModelName(
   modelName?: string | null
 ): LocalModelConfig | null {
   const id = localModelIdFromModelName(modelName)
-  const configs = readStoredConfigs()
+  const configs = listLocalModelConfigs()
   if (id) return configs.find(config => config.id === id) ?? null
   if (!modelName) return null
   return (
