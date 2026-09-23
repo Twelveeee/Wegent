@@ -3,6 +3,8 @@ name: Wework Provider Preview
 on:
   push:
     branches: [feature/wework-provider-yaml]
+    paths:
+      - .github/workflows/wework-provider-preview.yml
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
 
 concurrency:
   group: wework-provider-preview-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   source:
@@ -35,3 +37,38 @@ jobs:
             verification-tools.tar.gz
           retention-days: 7
           if-no-files-found: error
+  prepare:
+    name: Prepare macOS arm64 toolchain
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            executor/target
+          key: wework-provider-rust-arm64-${{ hashFiles('executor/Cargo.lock') }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            frontend/node_modules
+            wework/node_modules
+            packages/*/node_modules
+            wework/electron/node_modules
+          key: wework-provider-node-arm64-${{ hashFiles('pnpm-lock.yaml', 'wework/electron/pnpm-lock.yaml') }}
+      - name: Install locked dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir wework/electron install --frozen-lockfile
+      - name: Build unchanged native executor
+        run: cargo build --manifest-path executor/Cargo.toml --release --bin wegent-executor --target aarch64-apple-darwin
