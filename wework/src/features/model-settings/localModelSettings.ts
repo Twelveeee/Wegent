@@ -1,3 +1,4 @@
+import { getProviderModelConfigs, markProviderModelCatalogReady } from './providerModelState'
 import {
   createDefaultLocalModelCatalogEntry,
   type LocalModelCatalogEntry,
@@ -12,6 +13,7 @@ export const DEEPSEEK_V4_CONTEXT_WINDOW = 1_048_576
 
 export interface LocalModelConfig {
   id: string
+  providerConnectionId?: string
   providerProfileId?: string
   displayName: string
   group?: string
@@ -456,11 +458,24 @@ function nextLocalModelUpdatedAt(previous?: LocalModelConfig): string {
   return new Date(timestamp).toISOString()
 }
 
-export function listLocalModelConfigs(): LocalModelConfig[] {
+export function listLegacyLocalModelConfigs(): LocalModelConfig[] {
   return readStoredConfigs()
 }
 
+export function listLocalModelConfigs(): LocalModelConfig[] {
+  const owned = getProviderModelConfigs()
+  const ids = new Set(owned.map(model => model.id))
+  return [...readStoredConfigs().filter(model => !ids.has(model.id)), ...owned]
+}
+
+export function removeMigratedLocalModelConfigs(ids: ReadonlySet<string>): void {
+  writeStoredConfigs(readStoredConfigs().filter(model => !ids.has(model.id)))
+}
+
 export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalModelConfig {
+  if (input.id && getProviderModelConfigs().some(model => model.id === input.id)) {
+    throw new Error('Edit this model in Provider settings or its YAML file')
+  }
   const modelId = normalizeLocalModelId(input.modelId)
   const apiFormat = normalizeLocalModelApiFormat(input.apiFormat)
   const splitUrl = splitLocalModelRequestUrl(input.baseUrl, input.requestPath, apiFormat)
@@ -572,6 +587,7 @@ export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalMod
 }
 
 export function markLocalModelCatalogReady(snapshot: readonly LocalModelCatalogSnapshot[]): void {
+  markProviderModelCatalogReady(snapshot)
   const writtenVersions = new Map(snapshot.map(model => [model.id, model.updatedAt]))
   const configs = readStoredConfigs().map(config => {
     if (writtenVersions.get(config.id) !== config.updatedAt) return config
@@ -639,7 +655,7 @@ export function findLocalModelConfigByModelName(
   modelName?: string | null
 ): LocalModelConfig | null {
   const id = localModelIdFromModelName(modelName)
-  const configs = readStoredConfigs()
+  const configs = listLocalModelConfigs()
   if (id) return configs.find(config => config.id === id) ?? null
   if (!modelName) return null
   return (
