@@ -878,7 +878,8 @@ function localVisionSidecarConfig(config: LocalModelConfig): Record<string, unkn
     request_url: buildLocalModelRequestUrl(
       visionModel.baseUrl,
       visionModel.requestPath,
-      visionModel.apiFormat
+      visionModel.apiFormat,
+      Boolean(visionModel.providerConnectionId)
     ),
     api_format: visionModel.apiFormat,
     api_key: visionModel.apiKey || 'dummy',
@@ -954,7 +955,8 @@ function localRuntimeModelConfig(
     const requestUrl = buildLocalModelRequestUrl(
       localModel.baseUrl,
       localModel.requestPath,
-      localModel.apiFormat
+      localModel.apiFormat,
+      Boolean(localModel.providerConnectionId)
     )
     const visionSidecar = localVisionSidecarConfig(localModel)
     const primaryCodexCatalogModelId =

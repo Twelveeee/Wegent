@@ -383,8 +383,12 @@ export function normalizeLocalModelRequestPath(
 export function buildLocalModelRequestUrl(
   baseUrl: string,
   requestPath?: string | null,
-  apiFormat: LocalModelApiFormat = 'openai-responses'
+  apiFormat: LocalModelApiFormat = 'openai-responses',
+  exactBaseUrl = false
 ): string {
+  // Provider files declare an API prefix explicitly; do not guess its final path segment.
+  if (exactBaseUrl)
+    return `${normalizeLocalModelBaseUrl(baseUrl)}${normalizeLocalModelRequestPath(requestPath, apiFormat)}`
   const splitUrl = splitLocalModelRequestUrl(baseUrl, requestPath, apiFormat)
   return `${normalizeLocalModelBaseUrl(splitUrl.baseUrl)}${normalizeLocalModelRequestPath(
     splitUrl.requestPath,

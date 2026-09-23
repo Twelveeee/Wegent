@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { buildLocalModelRequestUrl } from './localModelSettings'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { migrateLegacyProviders, resolveProviderModels } from './providerModelConfig'
 import {
@@ -141,4 +142,23 @@ describe('provider runtime projection', () => {
     expect(() => removeMigratedLocalModelConfigs(['old'])).toThrow()
     expect(listLocalModelConfigs()).toHaveLength(1)
   })
+})
+
+it('provider connection prefixes are not mistaken for full legacy request URLs', () => {
+  expect(
+    buildLocalModelRequestUrl(
+      'https://relay.example/api/coding/v3',
+      '/responses',
+      'openai-responses',
+      true
+    )
+  ).toBe('https://relay.example/api/coding/v3/responses')
+  expect(
+    buildLocalModelRequestUrl(
+      'https://relay.example/vendor/anthropic',
+      '/v1/messages',
+      'anthropic-messages',
+      true
+    )
+  ).toBe('https://relay.example/vendor/anthropic/v1/messages')
 })

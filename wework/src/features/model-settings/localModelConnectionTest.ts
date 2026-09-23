@@ -11,6 +11,7 @@ const DEFAULT_TEST_TIMEOUT_MS = 15_000
 const DUMMY_API_KEY = 'dummy'
 
 export interface TestLocalModelConnectionInput {
+  providerConnectionId?: string
   baseUrl: string
   apiFormat?: LocalModelApiFormat | null
   requestPath?: string | null
@@ -315,7 +316,12 @@ export async function testLocalModelConnection(
   options: TestLocalModelConnectionOptions = {}
 ): Promise<TestLocalModelConnectionResult> {
   const apiFormat = normalizeLocalModelApiFormat(input.apiFormat)
-  const requestUrl = buildLocalModelRequestUrl(input.baseUrl, input.requestPath, apiFormat)
+  const requestUrl = buildLocalModelRequestUrl(
+    input.baseUrl,
+    input.requestPath,
+    apiFormat,
+    Boolean(input.providerConnectionId)
+  )
   const modelId = normalizeLocalModelId(input.modelId)
   const apiKey = input.apiKey?.trim() || DUMMY_API_KEY
   const toolProfile = input.toolProfile ?? defaultLocalModelToolProfile(apiFormat)
