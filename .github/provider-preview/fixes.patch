@@ -1,3 +1,26 @@
+--- a/wework/electron/src/host/provider-config-store.test.ts
++++ b/wework/electron/src/host/provider-config-store.test.ts
+@@ -1,5 +1,5 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
++import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+ import { tmpdir } from 'node:os'
+ import { join } from 'node:path'
+ import { ProviderConfigStore } from './provider-config-store.js'
+@@ -104,11 +104,11 @@
+     const path = join(directory, 'external.yml')
+     await writeFile(path, 'version: 1\nproviders:\n  - id: custom\n    name: Custom\n    base_url: https://example.invalid/v1\n    api_format: openai-responses\n    api_key: private-example\n    models: []\n')
+     const snapshot = await store.bind(path)
+-    expect(snapshot.path).toBe(path)
++    expect(snapshot.path).toBe(await realpath(path))
+     expect(JSON.stringify(snapshot)).not.toContain('private-example')
+     expect(await store.credentials(snapshot.revision)).toEqual({ custom: 'private-example' })
+     const restarted = new ProviderConfigStore(join(directory, 'config'), secrets)
+-    expect((await restarted.read()).path).toBe(path)
++    expect((await restarted.read()).path).toBe(await realpath(path))
+   })
+   it('rejects missing credential references without losing the working configuration', async () => {
+     const snapshot = await populated()
 --- a/wework/electron/src/host/provider-config-store.ts
 +++ b/wework/electron/src/host/provider-config-store.ts
 @@ -249,14 +249,14 @@
