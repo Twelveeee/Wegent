@@ -1,0 +1,154 @@
++export function replaceProviderModelConfigs(next: LocalModelConfig[]): void {
++  configurations = next
++}
++
++export function markProviderModelCatalogReady(snapshot: readonly LocalModelCatalogSnapshot[]): void {
++  const versions = new Map(snapshot.map(model => [model.id, model.updatedAt]))
++  configurations = configurations.map(model => versions.get(model.id) === model.updatedAt ? { ...model, catalogReady: true } : model)
++}
+diff --git a/wework/src/i18n/index.ts b/wework/src/i18n/index.ts
+index 4050c00..eb7903d 100644
+--- a/wework/src/i18n/index.ts
++++ b/wework/src/i18n/index.ts
+@@ -1,3 +1,5 @@
++import enModelConnections from './locales/en/modelConnections.json'
++import zhModelConnections from './locales/zh-CN/modelConnections.json'
+ import i18n from 'i18next'
+ import { initReactI18next } from 'react-i18next'
+ import LanguageDetector from 'i18next-browser-languagedetector'
+@@ -28,6 +30,7 @@ i18n
+         localRuntime: enLocalRuntime,
+         sites: enSites,
+         hooks: enHooks,
++        modelConnections: enModelConnections,
+         ...(extensionI18nResources.en ?? {}),
+       },
+       'zh-CN': {
+@@ -36,6 +39,7 @@ i18n
+         localRuntime: zhLocalRuntime,
+         sites: zhSites,
+         hooks: zhHooks,
++        modelConnections: zhModelConnections,
+         ...(extensionI18nResources['zh-CN'] ?? {}),
+       },
+     },
+@@ -43,7 +47,7 @@ i18n
+     fallbackLng: 'zh-CN',
+     supportedLngs: ['zh-CN', 'en'],
+     defaultNS: 'common',
+-    ns: ['common', 'chat', 'localRuntime', 'sites', 'hooks', ...extensionNamespaces],
++    ns: ['common', 'chat', 'localRuntime', 'sites', 'hooks', 'modelConnections', ...extensionNamespaces],
+     interpolation: { escapeValue: false },
+   })
+ 
+diff --git a/wework/src/i18n/locales/en/modelConnections.json b/wework/src/i18n/locales/en/modelConnections.json
+new file mode 100644
+index 0000000..76ce1b5
+--- /dev/null
++++ b/wework/src/i18n/locales/en/modelConnections.json
+@@ -0,0 +1,60 @@
++{
++  "title": "Provider connections",
++  "description": "Save a connection once; all its models share the address and key. Cloud models remain independent.",
++  "newProvider": "New connection",
++  "addProvider": "Add Provider",
++  "loading": "Loading model.yml…",
++  "chooseFile": "Choose YAML file",
++  "chooseDescription": "Choose an existing file to manage local Provider models. This replaces the active file binding, not cloud models or independent legacy configurations.",
++  "openFile": "Open in editor",
++  "reload": "Reload",
++  "fileHint": "The page and YAML edit the same configuration. Save externally, then reload. Invalid files retain the last valid configuration.",
++  "migrate": "Migrate existing models",
++  "migrateDescription": "Move {{count}} existing local models into shared connections, grouping only identical addresses, keys, protocols and paths. Model IDs and capabilities are preserved. Cloud models are not changed.",
++  "migrateCount": "Migrate {{count}} existing models",
++  "modelCount": "{{count}} models",
++  "disabled": "Disabled",
++  "edit": "Edit / add models",
++  "delete": "Delete",
++  "deleteProvider": "Delete connection",
++  "deleteDescription": "Remove “{{name}}” and its {{count}} models from new selections? Existing conversations are not deleted. No other provider or cloud model is changed.",
++  "keyConfigured": "Key configured",
++  "noKey": "No key",
++  "emptyModels": "No models yet. Edit this connection to add models.",
++  "empty": "Add a Provider or bind an existing model.yml file.",
++  "failed": "The operation failed",
++  "cancel": "Cancel",
++  "confirm": "Confirm",
++  "name": "Connection name",
++  "protocol": "API protocol",
++  "keepKey": "Configured — leave blank to keep",
++  "optionalKey": "Optional for unauthenticated endpoints",
++  "connectionAdvanced": "Advanced connection settings",
++  "requestPath": "Request path",
++  "modelsPath": "Model list path",
++  "automatic": "Automatic",
++  "listAuth": "Model list authentication header",
++  "enabled": "Enabled",
++  "models": "Models",
++  "discover": "Retrieve model list",
++  "discoveryHint": "Save the connection before retrieving models. Discovery does not test inference or tool support. Manual entry is always available.",
++  "alreadyAdded": "Already added",
++  "addSelected": "Add {{count}} selected",
++  "batch": "Paste model IDs (one per line or comma-separated)",
++  "batchPlaceholder": "upstream-model-a\nupstream-model-b",
++  "append": "Add pasted models",
++  "manual": "Add manually",
++  "modelId": "Upstream model ID",
++  "displayName": "Display name (optional)",
++  "remove": "Remove",
++  "saveHint": "Saving writes the bound YAML file; keys entered here use the local encrypted credential store. New catalog entries are reconciled when the runtime is idle. Active tasks are not forcibly restarted.",
++  "save": "Save connection",
++  "discard": "Discard changes?",
++  "discardDescription": "Unsaved connection and model changes will be lost.",
++  "modelAdvanced": "Model-specific settings",
++  "inherit": "Inherit connection",
++  "contextWindow": "Context window (tokens)",
++  "toolProfile": "Tool profile",
++  "toolCompatibility": "Responses tool compatibility",
++  "capabilities": "Advanced capability catalog"
++}
+diff --git a/wework/src/i18n/locales/zh-CN/modelConnections.json b/wework/src/i18n/locales/zh-CN/modelConnections.json
+new file mode 100644
+index 0000000..443c36c
+--- /dev/null
++++ b/wework/src/i18n/locales/zh-CN/modelConnections.json
+@@ -0,0 +1,60 @@
++{
++  "title": "Provider 服务连接",
++  "description": "连接地址和 Key 只填写一次，所属模型共同使用；云端下发模型独立管理。",
++  "newProvider": "新服务连接",
++  "addProvider": "添加 Provider",
++  "loading": "正在加载 model.yml…",
++  "chooseFile": "选择 YAML 文件",
++  "chooseDescription": "选择已有文件作为本地 Provider 配置来源。只切换当前文件绑定，不覆盖云端模型或尚未迁移的独立模型。",
++  "openFile": "打开文件编辑",
++  "reload": "重新加载",
++  "fileHint": "页面与 YAML 编辑同一份配置。外部保存后点击重新加载；文件错误时保留上一份有效配置。",
++  "migrate": "迁移已有模型",
++  "migrateDescription": "将 {{count}} 个已有本地模型按相同地址、Key、协议和路径整理为共享连接。保留原模型 ID 和能力参数，不修改云端模型。",
++  "migrateCount": "迁移 {{count}} 个已有模型",
++  "modelCount": "{{count}} 个模型",
++  "disabled": "已停用",
++  "edit": "编辑 / 添加模型",
++  "delete": "删除",
++  "deleteProvider": "删除服务连接",
++  "deleteDescription": "从新任务的可选模型中移除“{{name}}”及其 {{count}} 个模型？已有对话不会删除，其他连接和云端模型不受影响。",
++  "keyConfigured": "Key 已配置",
++  "noKey": "未配置 Key",
++  "emptyModels": "尚无模型，点击编辑添加。",
++  "empty": "添加 Provider，或绑定已有的 model.yml 文件。",
++  "failed": "操作失败",
++  "cancel": "取消",
++  "confirm": "确认",
++  "name": "连接名称",
++  "protocol": "API 协议",
++  "keepKey": "已配置，留空保留原 Key",
++  "optionalKey": "无鉴权入口可留空",
++  "connectionAdvanced": "连接高级设置",
++  "requestPath": "请求路径",
++  "modelsPath": "模型列表路径",
++  "automatic": "自动",
++  "listAuth": "模型列表鉴权头",
++  "enabled": "启用",
++  "models": "所属模型",
++  "discover": "获取模型列表",
