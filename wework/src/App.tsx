@@ -62,6 +62,7 @@ import { CloudConnectionProvider } from '@/features/cloud-connection/CloudConnec
 import { useCloudConnection } from '@/features/cloud-connection/useCloudConnection'
 import { LocalExecutorCloudBridge } from '@/features/cloud-connection/LocalExecutorCloudBridge'
 import { PluginAutoUpdateCoordinator } from '@/features/plugins/PluginAutoUpdateCoordinator'
+import { ProviderConfigSync } from '@/features/model-settings/ProviderConfigSync'
 import { CloudModelCatalogSyncDialogHost } from '@/features/model-settings/cloudModelCatalogSync'
 import { cn } from '@/lib/utils'
 import { createLocalAppServices } from '@/api/local/localServices'
@@ -1197,6 +1198,7 @@ function AppShell() {
             </>
           ) : null}
           {isMainWindow && isElectron ? <PluginAutoUpdateCoordinator /> : null}
+          <ProviderConfigSync />
           <CloudModelCatalogSyncDialogHost />
           <div
             data-testid="app-route-host"

@@ -1,4 +1,9 @@
 import {
+  getProviderFileModels,
+  isProviderFileModel,
+  updateProviderFileRuntimeState,
+} from './providerConfigState'
+import {
   createDefaultLocalModelCatalogEntry,
   type LocalModelCatalogEntry,
 } from './localModelCatalog'
@@ -130,7 +135,7 @@ function validateLocalModelToolProfile(
   }
 }
 
-function readStoredConfigs(): LocalModelConfig[] {
+function readLegacyStoredConfigs(): LocalModelConfig[] {
   try {
     const raw = globalThis.localStorage?.getItem(LOCAL_MODEL_SETTINGS_STORAGE_KEY)
     if (!raw) return []
@@ -140,6 +145,23 @@ function readStoredConfigs(): LocalModelConfig[] {
   } catch {
     return []
   }
+}
+
+function readStoredConfigs(): LocalModelConfig[] {
+  const managed = getProviderFileModels()
+  const managedIds = new Set(managed.map(model => model.id))
+  return [...readLegacyStoredConfigs().filter(model => !managedIds.has(model.id)), ...managed]
+}
+
+export function listLegacyLocalModelConfigs(): LocalModelConfig[] {
+  return readLegacyStoredConfigs().filter(model => !isProviderFileModel(model.id))
+}
+
+export function removeMigratedLocalModels(ids: string[]): void {
+  const migrated = new Set(ids)
+  const remaining = readLegacyStoredConfigs().filter(model => !migrated.has(model.id))
+  globalThis.localStorage?.setItem(LOCAL_MODEL_SETTINGS_STORAGE_KEY, JSON.stringify(remaining))
+  dispatchChanged(readStoredConfigs())
 }
 
 function isLocalModelConfig(value: unknown): value is LocalModelConfig {
@@ -193,7 +215,7 @@ function isLocalModelConfig(value: unknown): value is LocalModelConfig {
   )
 }
 
-function normalizeStoredLocalModelConfig(config: LocalModelConfig): LocalModelConfig {
+export function normalizeStoredLocalModelConfig(config: LocalModelConfig): LocalModelConfig {
   const legacyConfig = config as LocalModelConfig & { requestUrlMode?: string }
   const providerProfileId =
     legacyConfig.providerProfileId === 'minimax' &&
@@ -303,7 +325,9 @@ function normalizeStoredLocalModelConfig(config: LocalModelConfig): LocalModelCo
 }
 
 function writeStoredConfigs(configs: LocalModelConfig[]): void {
-  globalThis.localStorage?.setItem(LOCAL_MODEL_SETTINGS_STORAGE_KEY, JSON.stringify(configs))
+  updateProviderFileRuntimeState(configs)
+  const legacy = configs.filter(model => !isProviderFileModel(model.id))
+  globalThis.localStorage?.setItem(LOCAL_MODEL_SETTINGS_STORAGE_KEY, JSON.stringify(legacy))
   dispatchChanged(configs)
 }
 
@@ -461,6 +485,9 @@ export function listLocalModelConfigs(): LocalModelConfig[] {
 }
 
 export function saveLocalModelConfig(input: SaveLocalModelConfigInput): LocalModelConfig {
+  if (input.id && isProviderFileModel(input.id)) {
+    throw new Error('This model is managed by the Provider page and its YAML file')
+  }
   const modelId = normalizeLocalModelId(input.modelId)
   const apiFormat = normalizeLocalModelApiFormat(input.apiFormat)
   const splitUrl = splitLocalModelRequestUrl(input.baseUrl, input.requestPath, apiFormat)

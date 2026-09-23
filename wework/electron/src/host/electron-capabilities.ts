@@ -55,6 +55,7 @@ import type { BrowserAnnotationController } from './browser-annotation-controlle
 import { RotatingLog } from '../runtime/rotating-log.js'
 import { registerMicrophoneDiagnostics } from './microphone-diagnostics.js'
 import { readMacosMicrophoneChecks } from './macos-microphone-diagnostics.js'
+import { registerModelConfigCapabilities } from './model-config-capabilities.js'
 import type { WeworkSyncRequest } from './wework-sync-request.js'
 
 export { captureWebContentsDataUrl } from './web-contents-capture.js'
@@ -295,6 +296,7 @@ export function createElectronCapabilityRouter(
   let activeIsolatedClipboardLease: string | null = null
   router.grant(WEWORK_APP_PRINCIPAL, coreGrantedCapabilities())
   registerMicrophoneDiagnostics(router, readMacosMicrophoneChecks)
+  registerModelConfigCapabilities(router, desktopServices.secureStorage, desktopServices.events)
 
   router.register('navigation.pendingSchemes', () => desktopServices.pendingSchemes.read())
   router.register('navigation.acknowledgeScheme', params => {

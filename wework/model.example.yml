@@ -1,0 +1,19 @@
+# Local provider configuration. Keep IDs stable when renaming entries.
+# Choose this file in Settings > Models > Providers and YAML.
+# Prefer entering the API key in the UI: it creates a local encrypted credential reference.
+# Do not commit an api_key containing a real credential.
+version: 1
+providers:
+  - id: my-relay
+    name: My relay
+    base_url: https://gateway.example/v1
+    api_format: openai-responses
+    models_path: /models
+    models:
+      - id: primary-model
+        model_id: upstream-model-a
+        display_name: Main coding model
+      - id: fast-model
+        model_id: upstream-model-b
+        display_name: Fast model
+        enabled: false
