@@ -9,10 +9,14 @@ export function registerModelConfigurationCapabilities(
   router: HostCapabilityRouter,
   window: () => BrowserWindow | null,
   secrets: SecureValueStore,
-  events: DesktopHostEventBroker,
+  events: DesktopHostEventBroker
 ): void {
   let instance: ModelConfigurationStore | null = null
-  const store = () => instance ??= new ModelConfigurationStore(join(app.getPath('userData'), 'model-connections'), secrets)
+  const store = () =>
+    (instance ??= new ModelConfigurationStore(
+      join(app.getPath('userData'), 'model-connections'),
+      secrets
+    ))
   router.register('modelConfiguration.read', () => store().read())
   router.register('modelConfiguration.runtime', () => store().runtime())
   router.register('modelConfiguration.save', async params => {
@@ -22,9 +26,14 @@ export function registerModelConfigurationCapabilities(
     return result
   })
   router.register('modelConfiguration.choose', async () => {
-    const options = { properties: ['openFile'] as ['openFile'], filters: [{ name: 'YAML', extensions: ['yml', 'yaml'] }] }
+    const options = {
+      properties: ['openFile'] as ['openFile'],
+      filters: [{ name: 'YAML', extensions: ['yml', 'yaml'] }],
+    }
     const parent = window()
-    const selected = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+    const selected = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options)
     if (selected.canceled || !selected.filePaths[0]) return null
     const result = await store().bind(selected.filePaths[0])
     events.publish('model-configuration.changed', { revision: result.revision })

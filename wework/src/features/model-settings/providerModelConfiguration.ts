@@ -29,27 +29,47 @@ const listeners = new Set<() => void>()
 let initialized: Promise<void> | null = null
 let reloadSequence = 0
 
-export function getProviderConfigurationState(): ProviderConfigurationState { return state }
+export function getProviderConfigurationState(): ProviderConfigurationState {
+  return state
+}
 export function subscribeProviderConfiguration(listener: () => void): () => void {
   listeners.add(listener)
-  return () => { listeners.delete(listener) }
+  return () => {
+    listeners.delete(listener)
+  }
 }
 function publish(snapshot: ModelConfigurationSnapshot | null, error: string | null): void {
   state = { snapshot, error }
   listeners.forEach(listener => listener())
 }
 
-export function resolveProviderModel(entry: ResolvedProviderModel, previous?: LocalModelConfig): LocalModelConfig {
+export function resolveProviderModel(
+  entry: ResolvedProviderModel,
+  previous?: LocalModelConfig
+): LocalModelConfig {
   const { model, provider } = entry
   const apiFormat = model.api_format ?? provider.api_format
   const toolProfile = model.tool_profile ?? defaultLocalModelToolProfile(apiFormat)
   const displayName = model.display_name || model.model_id
   const profileId = model.provider_profile_id ?? 'custom'
-  const catalogEntry = model.catalog_entry ?? (profileId === 'custom'
-    ? createDefaultLocalModelCatalogEntry({ id: model.id, displayName, toolProfile, contextWindow: model.context_window })
-    : undefined)
-  const requestPath = model.request_path ?? (model.api_format && model.api_format !== provider.api_format ? undefined : provider.request_path)
-    ?? (apiFormat === 'anthropic-messages' && provider.base_url.endsWith('/v1') ? '/messages' : defaultLocalModelRequestPath(apiFormat))
+  const catalogEntry =
+    model.catalog_entry ??
+    (profileId === 'custom'
+      ? createDefaultLocalModelCatalogEntry({
+          id: model.id,
+          displayName,
+          toolProfile,
+          contextWindow: model.context_window,
+        })
+      : undefined)
+  const requestPath =
+    model.request_path ??
+    (model.api_format && model.api_format !== provider.api_format
+      ? undefined
+      : provider.request_path) ??
+    (apiFormat === 'anthropic-messages' && provider.base_url.endsWith('/v1')
+      ? '/messages'
+      : defaultLocalModelRequestPath(apiFormat))
   const config: LocalModelConfig = {
     id: model.id,
     providerConnectionId: provider.id,
@@ -63,20 +83,34 @@ export function resolveProviderModel(entry: ResolvedProviderModel, previous?: Lo
     apiKey: provider.api_key,
     apiKeyConfigured: Boolean(provider.api_key),
     toolProfile,
-    codexToolCompatibility: apiFormat === 'openai-responses' ? model.codex_tool_compatibility ?? 'native' : 'standard',
+    codexToolCompatibility:
+      apiFormat === 'openai-responses' ? (model.codex_tool_compatibility ?? 'native') : 'standard',
     contextWindow: model.context_window,
     webSearchMode: model.web_search_mode ?? 'disabled',
     imageGenerationEnabled: model.image_generation_enabled ?? false,
     visionModelConfigId: model.vision_model_config_id,
-    codexCatalogModelId: model.codex_catalog_model_id ?? (typeof catalogEntry?.slug === 'string' ? catalogEntry.slug : undefined),
+    codexCatalogModelId:
+      model.codex_catalog_model_id ??
+      (typeof catalogEntry?.slug === 'string' ? catalogEntry.slug : undefined),
     catalogEntry,
-    catalogReady: !catalogEntry || Boolean(previous?.catalogReady && JSON.stringify(previous.catalogEntry) === JSON.stringify(catalogEntry)),
+    catalogReady:
+      !catalogEntry ||
+      Boolean(
+        previous?.catalogReady &&
+        JSON.stringify(previous.catalogEntry) === JSON.stringify(catalogEntry)
+      ),
     enabled: provider.enabled !== false && model.enabled !== false,
     updatedAt: previous?.updatedAt ?? new Date().toISOString(),
   }
-  if (previous && JSON.stringify({ ...config, updatedAt: '' }) === JSON.stringify({ ...previous, updatedAt: '' })) return previous
+  if (
+    previous &&
+    JSON.stringify({ ...config, updatedAt: '' }) === JSON.stringify({ ...previous, updatedAt: '' })
+  )
+    return previous
   const lastTimestamp = previous ? Date.parse(previous.updatedAt) : 0
-  config.updatedAt = new Date(Math.max(Date.now(), Number.isFinite(lastTimestamp) ? lastTimestamp + 1 : 0)).toISOString()
+  config.updatedAt = new Date(
+    Math.max(Date.now(), Number.isFinite(lastTimestamp) ? lastTimestamp + 1 : 0)
+  ).toISOString()
   return config
 }
 
@@ -84,17 +118,27 @@ export async function reloadProviderConfiguration(): Promise<void> {
   const sequence = ++reloadSequence
   try {
     const snapshot = await invokeDesktopHost<ModelConfigurationSnapshot>('modelConfiguration.read')
-    const runtime = await invokeDesktopHost<{ revision: string; models: ResolvedProviderModel[] }>('modelConfiguration.runtime')
+    const runtime = await invokeDesktopHost<{ revision: string; models: ResolvedProviderModel[] }>(
+      'modelConfiguration.runtime'
+    )
     if (sequence !== reloadSequence) return
-    if (runtime.revision && runtime.revision !== snapshot.revision) throw new Error('Model configuration changed while loading. Reload it again.')
+    if (runtime.revision && runtime.revision !== snapshot.revision)
+      throw new Error('Model configuration changed while loading. Reload it again.')
     const previous = new Map(getProviderModelConfigs().map(model => [model.id, model]))
-    const next = runtime.models.map(entry => resolveProviderModel(entry, previous.get(entry.model.id)))
-    const changed = next.length !== previous.size || next.some(model => model !== previous.get(model.id))
+    const next = runtime.models.map(entry =>
+      resolveProviderModel(entry, previous.get(entry.model.id))
+    )
+    const changed =
+      next.length !== previous.size || next.some(model => model !== previous.get(model.id))
     replaceProviderModelConfigs(next)
     publish(snapshot, snapshot.error ?? null)
     if (changed) window.dispatchEvent(new CustomEvent(LOCAL_MODEL_SETTINGS_CHANGED_EVENT))
   } catch (error) {
-    if (sequence === reloadSequence) publish(state.snapshot, error instanceof Error ? error.message : 'Model configuration could not be loaded')
+    if (sequence === reloadSequence)
+      publish(
+        state.snapshot,
+        error instanceof Error ? error.message : 'Model configuration could not be loaded'
+      )
   }
 }
 
@@ -109,7 +153,10 @@ export function initializeProviderModelConfiguration(): Promise<void> {
   return initialized
 }
 
-export async function saveProviderConfiguration(revision: string, providers: Array<ModelProvider | PublicModelProvider>): Promise<void> {
+export async function saveProviderConfiguration(
+  revision: string,
+  providers: Array<ModelProvider | PublicModelProvider>
+): Promise<void> {
   await invokeDesktopHost('modelConfiguration.save', { revision, providers })
   await reloadProviderConfiguration()
   if (state.error) throw new Error(state.error)
@@ -145,7 +192,12 @@ export function groupLegacyModels(configs: LocalModelConfig[]): ModelProvider[] 
   const groups = new Map<string, ModelProvider>()
   for (const config of configs) {
     // Never log this internal equality key: credentials distinguish connections.
-    const key = JSON.stringify([config.baseUrl, config.apiKey ?? '', config.apiFormat, config.requestPath ?? ''])
+    const key = JSON.stringify([
+      config.baseUrl,
+      config.apiKey ?? '',
+      config.apiFormat,
+      config.requestPath ?? '',
+    ])
     let provider = groups.get(key)
     if (!provider) {
       provider = {
@@ -165,9 +217,16 @@ export function groupLegacyModels(configs: LocalModelConfig[]): ModelProvider[] 
   return JSON.parse(JSON.stringify([...groups.values()])) as ModelProvider[]
 }
 
-export async function migrateLegacyProviderModels(snapshot: ModelConfigurationSnapshot): Promise<void> {
-  const ownedIds = new Set(snapshot.providers.flatMap(provider => provider.models.map(model => model.id)))
+export async function migrateLegacyProviderModels(
+  snapshot: ModelConfigurationSnapshot
+): Promise<void> {
+  const ownedIds = new Set(
+    snapshot.providers.flatMap(provider => provider.models.map(model => model.id))
+  )
   const legacy = listLegacyLocalModelConfigs().filter(model => !ownedIds.has(model.id))
-  await saveProviderConfiguration(snapshot.revision, [...snapshot.providers, ...groupLegacyModels(legacy)])
+  await saveProviderConfiguration(snapshot.revision, [
+    ...snapshot.providers,
+    ...groupLegacyModels(legacy),
+  ])
   removeMigratedLocalModelConfigs(new Set([...ownedIds, ...legacy.map(model => model.id)]))
 }

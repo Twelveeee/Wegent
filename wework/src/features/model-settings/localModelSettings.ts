@@ -371,6 +371,17 @@ export function buildLocalModelRequestUrl(
   )}`
 }
 
+/** Provider files store a base prefix, never an inferred complete request URL. */
+export function localModelConfigRequestUrl(config: LocalModelConfig): string {
+  if (config.providerConnectionId) {
+    return `${normalizeLocalModelBaseUrl(config.baseUrl)}${normalizeLocalModelRequestPath(
+      config.requestPath,
+      config.apiFormat
+    )}`
+  }
+  return buildLocalModelRequestUrl(config.baseUrl, config.requestPath, config.apiFormat)
+}
+
 export function splitLocalModelRequestUrl(
   value: string,
   preferredPath?: string | null,

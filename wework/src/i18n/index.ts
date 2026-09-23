@@ -47,7 +47,15 @@ i18n
     fallbackLng: 'zh-CN',
     supportedLngs: ['zh-CN', 'en'],
     defaultNS: 'common',
-    ns: ['common', 'chat', 'localRuntime', 'sites', 'hooks', 'modelConnections', ...extensionNamespaces],
+    ns: [
+      'common',
+      'chat',
+      'localRuntime',
+      'sites',
+      'hooks',
+      'modelConnections',
+      ...extensionNamespaces,
+    ],
     interpolation: { escapeValue: false },
   })
 
