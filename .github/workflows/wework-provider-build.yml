@@ -2,7 +2,7 @@ name: Wework Provider macOS Build
 
 on:
   push:
-    branches: [feature/wework-provider-yaml]
+    branches: [feature/wework-provider-yaml-macos-final]
     paths:
       - .github/workflows/wework-provider-build.yml
       - .github/provider-preview/**
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: wework-provider-build-${{ github.ref }}
+  group: wework-provider-final-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -26,6 +26,9 @@ jobs:
       WEWORK_ELECTRON_DEPENDENCIES_READY: 'true'
       VITE_WEWORK_E2E: 'false'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Existing message timestamp fixtures assert +08:00 local-time output.
+      # Set TZ before Node/Vitest workers start, not inside a worker thread.
+      TZ: Asia/Shanghai
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,11 +80,13 @@ jobs:
       - name: UI, legacy models and cloud merge regression
         run: |
           pnpm --filter wework test src/features/model-settings/providerConfig.test.ts src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/features/model-settings/localModelSettings.test.ts src/features/model-settings/localModelProviders.test.ts src/features/model-settings/localModelCatalog.test.ts src/api/hybrid/hybridServices.test.ts src/features/workbench/runtimeModelSelection.test.ts
+      - name: Verify timestamp regression with deterministic test timezone
+        run: pnpm --filter wework test src/components/chat/MessageList.test.tsx
       - name: Commit verified source to feature branch
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = feature/wework-provider-yaml
+          test "$GITHUB_REF_NAME" = feature/wework-provider-yaml-macos-final
           python3 - <<'PY'
           import subprocess
           paths = subprocess.check_output(['git', 'ls-files', '.github'], text=True).splitlines()
@@ -94,8 +99,8 @@ jobs:
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git commit -m 'feat(wework): share provider connections across GUI and YAML configuration'
-            # Both language guides were reviewed; retain and satisfy the repository push gate.
-            AI_VERIFIED=1 git push origin HEAD:feature/wework-provider-yaml
+            # Both language guides were reviewed; retain the full repository push gate.
+            AI_VERIFIED=1 git push origin HEAD:feature/wework-provider-yaml-macos-final 2>&1 | tee "$RUNNER_TEMP/provider-push.log"
           fi
           echo "WEWORK_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Restore unchanged arm64 executor
@@ -160,6 +165,7 @@ jobs:
           git diff --binary HEAD -- wework docs > preview-diagnostics/worktree.patch
           git status --short > preview-diagnostics/status.txt
           printf '%s\n' "$GITHUB_SHA" > preview-diagnostics/trigger-sha.txt
+          if test -f "$RUNNER_TEMP/provider-push.log"; then cp "$RUNNER_TEMP/provider-push.log" preview-diagnostics/; fi
           tar -czf preview-diagnostics/provider-source.tar.gz --exclude=node_modules --exclude=.git --exclude=target --exclude=release --exclude=resources --exclude=dist --exclude=.package-staging wework docs/zh/wework/provider-file.md docs/en/wework/provider-file.md
       - name: Upload diagnostics
         if: always()
