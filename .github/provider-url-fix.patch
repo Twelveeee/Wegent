@@ -1,0 +1,101 @@
+diff --git a/wework/src/api/local/localServices.ts b/wework/src/api/local/localServices.ts
+index 185fe45..940b310 100644
+--- a/wework/src/api/local/localServices.ts
++++ b/wework/src/api/local/localServices.ts
+@@ -878,7 +878,8 @@ function localVisionSidecarConfig(config: LocalModelConfig): Record<string, unkn
+     request_url: buildLocalModelRequestUrl(
+       visionModel.baseUrl,
+       visionModel.requestPath,
+-      visionModel.apiFormat
++      visionModel.apiFormat,
++      Boolean(visionModel.providerConnectionId)
+     ),
+     api_format: visionModel.apiFormat,
+     api_key: visionModel.apiKey || 'dummy',
+@@ -954,7 +955,8 @@ function localRuntimeModelConfig(
+     const requestUrl = buildLocalModelRequestUrl(
+       localModel.baseUrl,
+       localModel.requestPath,
+-      localModel.apiFormat
++      localModel.apiFormat,
++      Boolean(localModel.providerConnectionId)
+     )
+     const visionSidecar = localVisionSidecarConfig(localModel)
+     const primaryCodexCatalogModelId =
+diff --git a/wework/src/features/model-settings/localModelConnectionTest.ts b/wework/src/features/model-settings/localModelConnectionTest.ts
+index d33ab7b..afffc63 100644
+--- a/wework/src/features/model-settings/localModelConnectionTest.ts
++++ b/wework/src/features/model-settings/localModelConnectionTest.ts
+@@ -11,6 +11,7 @@ const DEFAULT_TEST_TIMEOUT_MS = 15_000
+ const DUMMY_API_KEY = 'dummy'
+ 
+ export interface TestLocalModelConnectionInput {
++  providerConnectionId?: string
+   baseUrl: string
+   apiFormat?: LocalModelApiFormat | null
+   requestPath?: string | null
+@@ -315,7 +316,12 @@ export async function testLocalModelConnection(
+   options: TestLocalModelConnectionOptions = {}
+ ): Promise<TestLocalModelConnectionResult> {
+   const apiFormat = normalizeLocalModelApiFormat(input.apiFormat)
+-  const requestUrl = buildLocalModelRequestUrl(input.baseUrl, input.requestPath, apiFormat)
++  const requestUrl = buildLocalModelRequestUrl(
++    input.baseUrl,
++    input.requestPath,
++    apiFormat,
++    Boolean(input.providerConnectionId)
++  )
+   const modelId = normalizeLocalModelId(input.modelId)
+   const apiKey = input.apiKey?.trim() || DUMMY_API_KEY
+   const toolProfile = input.toolProfile ?? defaultLocalModelToolProfile(apiFormat)
+diff --git a/wework/src/features/model-settings/localModelSettings.ts b/wework/src/features/model-settings/localModelSettings.ts
+index 0d5ae59..8ce4b31 100644
+--- a/wework/src/features/model-settings/localModelSettings.ts
++++ b/wework/src/features/model-settings/localModelSettings.ts
+@@ -383,8 +383,12 @@ export function normalizeLocalModelRequestPath(
+ export function buildLocalModelRequestUrl(
+   baseUrl: string,
+   requestPath?: string | null,
+-  apiFormat: LocalModelApiFormat = 'openai-responses'
++  apiFormat: LocalModelApiFormat = 'openai-responses',
++  exactBaseUrl = false
+ ): string {
++  // Provider files declare an API prefix explicitly; do not guess its final path segment.
++  if (exactBaseUrl)
++    return `${normalizeLocalModelBaseUrl(baseUrl)}${normalizeLocalModelRequestPath(requestPath, apiFormat)}`
+   const splitUrl = splitLocalModelRequestUrl(baseUrl, requestPath, apiFormat)
+   return `${normalizeLocalModelBaseUrl(splitUrl.baseUrl)}${normalizeLocalModelRequestPath(
+     splitUrl.requestPath,
+diff --git a/wework/src/features/model-settings/providerModelConfig.test.ts b/wework/src/features/model-settings/providerModelConfig.test.ts
+index 22596a5..b253add 100644
+--- a/wework/src/features/model-settings/providerModelConfig.test.ts
++++ b/wework/src/features/model-settings/providerModelConfig.test.ts
+@@ -1,4 +1,5 @@
+ // @vitest-environment jsdom
++import { buildLocalModelRequestUrl } from './localModelSettings'
+ import { beforeEach, describe, expect, it } from 'vitest'
+ import { migrateLegacyProviders, resolveProviderModels } from './providerModelConfig'
+ import {
+@@ -142,3 +143,22 @@ describe('provider runtime projection', () => {
+     expect(listLocalModelConfigs()).toHaveLength(1)
+   })
+ })
++
++it('provider connection prefixes are not mistaken for full legacy request URLs', () => {
++  expect(
++    buildLocalModelRequestUrl(
++      'https://relay.example/api/coding/v3',
++      '/responses',
++      'openai-responses',
++      true
++    )
++  ).toBe('https://relay.example/api/coding/v3/responses')
++  expect(
++    buildLocalModelRequestUrl(
++      'https://relay.example/vendor/anthropic',
++      '/v1/messages',
++      'anthropic-messages',
++      true
++    )
++  ).toBe('https://relay.example/vendor/anthropic/v1/messages')
++})
