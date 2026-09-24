@@ -1,0 +1,121 @@
+name: Verify WeWork PR 3744 repair
+on:
+  push:
+    branches: [fix/wework-provider-ci-3744]
+    paths:
+      - .github/provider-ci-fix.patch.gz.b64
+      - .github/workflows/wework-provider-ci-repair.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: provider-ci-repair-3744
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      NODE_OPTIONS: --max-old-space-size=8192
+      PR_HEAD: 517d8cd99c9380b66c6f355434d5aa4513549e07
+      UPSTREAM_BASE: ca1c10debb7986c7bce3baf0b55d89e965399f76
+      PATCH_SHA256: cc38155c082680c7de40ce366befad4e0b35cca109346c5989aad90121e36423
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply reviewed repair and prepare upstream integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = Twelveeee/Wegent
+          test "$GITHUB_REF_NAME" = fix/wework-provider-ci-3744
+          mkdir -p "$RUNNER_TEMP/provider-repair"
+          base64 --decode .github/provider-ci-fix.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/provider-repair/repair.patch"
+          echo "$PATCH_SHA256  $RUNNER_TEMP/provider-repair/repair.patch" | sha256sum --check
+          git checkout --detach "$PR_HEAD"
+          git apply --check "$RUNNER_TEMP/provider-repair/repair.patch"
+          git apply "$RUNNER_TEMP/provider-repair/repair.patch"
+          git add -- wework
+          git diff --cached --check
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          paths = subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()
+          assert len(paths) == 12
+          entries = []
+          for path in paths:
+              assert path.startswith('wework/') and pathlib.Path(path).is_file()
+              entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': pathlib.Path(path).read_text()})
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'provider-repair', 'entries.json').write_text(json.dumps(entries))
+          PY
+          git config user.name 'WeWork CI validation'
+          git config user.email 'noreply@localhost'
+          git commit -m 'test: stage exact provider repair for upstream integration validation'
+          git fetch --no-tags https://github.com/wecode-ai/Wegent.git "$UPSTREAM_BASE"
+          git merge --no-commit --no-ff "$UPSTREAM_BASE"
+          git diff --check
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install workspace dependencies only
+        run: |
+          pnpm install --frozen-lockfile
+          test ! -d wework/electron/node_modules
+      - name: Reproduce upstream workspace-only TypeScript gate
+        shell: bash
+        run: |
+          set -o pipefail
+          test ! -d wework/electron/node_modules
+          pnpm --filter wework typecheck 2>&1 | tee "$RUNNER_TEMP/provider-repair/workspace-types.log"
+      - name: Run complete WeWork lint and focused renderer regressions
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --filter wework lint 2>&1 | tee "$RUNNER_TEMP/provider-repair/lint.log"
+          pnpm --filter wework test src/features/model-settings/providerModelConfiguration.test.ts src/features/model-settings/localModelSettings.test.ts src/components/settings/ProviderSettingsSection.test.tsx src/components/settings/ModelSettingsPage.test.tsx src/api/hybrid/hybridServices.test.ts src/api/local/localServices.test.ts --maxWorkers=2 2>&1 | tee "$RUNNER_TEMP/provider-repair/renderer-tests.log"
+      - name: Install native dependencies and verify host
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir wework/electron install --frozen-lockfile
+          pnpm --dir wework/electron typecheck 2>&1 | tee "$RUNNER_TEMP/provider-repair/host-types.log"
+          pnpm --dir wework/electron test src/host/model-configuration-store.test.ts src/host/capability-router.test.ts src/host/electron-capabilities.test.ts src/host/secure-value-store.test.ts --maxWorkers=2 2>&1 | tee "$RUNNER_TEMP/provider-repair/host-tests.log"
+      - name: Publish clean candidate commit only after verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          repo = os.environ['GITHUB_REPOSITORY']
+          head = os.environ['PR_HEAD']
+          folder = pathlib.Path(os.environ['RUNNER_TEMP'], 'provider-repair')
+          def api(path, payload=None, method='POST'):
+              args = ['gh', 'api', f'repos/{repo}/{path}']
+              if payload is not None: args += ['--method', method, '--input', '-']
+              data = json.dumps(payload).encode() if payload is not None else None
+              return json.loads(subprocess.check_output(args, input=data))
+          assert api('git/ref/heads/feat/wework-provider-connections')['object']['sha'] == head, 'PR head changed; do not replace concurrent work'
+          parent = api(f'git/commits/{head}')
+          tree = api('git/trees', {'base_tree': parent['tree']['sha'], 'tree': json.loads((folder / 'entries.json').read_text())})
+          commit = api('git/commits', {'tree': tree['sha'], 'parents': [head], 'message': 'fix(wework): isolate provider contract and recover missing credentials'})
+          branch = 'fix/wework-provider-ci-3744-verified'
+          api('git/refs', {'ref': f'refs/heads/{branch}', 'sha': commit['sha']})
+          result = {'commit': commit['sha'], 'parent': head, 'upstream_base_tested': os.environ['UPSTREAM_BASE'], 'candidate_branch': branch, 'workflow_run': os.environ['GITHUB_RUN_ID'], 'pr_branch_updated': False}
+          (folder / 'verification.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-pr3744-repair-verification
+          path: |
+            ${{ runner.temp }}/provider-repair/*.log
+            ${{ runner.temp }}/provider-repair/*.patch
+            ${{ runner.temp }}/provider-repair/verification.json
+          retention-days: 14
+          if-no-files-found: error
