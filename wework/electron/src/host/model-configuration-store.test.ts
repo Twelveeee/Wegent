@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ModelConfigurationStore } from './model-configuration-store.js'
 import {
   parseModelConfiguration,
@@ -25,6 +25,7 @@ beforeEach(async () => {
   values = new Map()
 })
 afterEach(async () => {
+  vi.unstubAllGlobals()
   await rm(directory, { recursive: true, force: true })
 })
 
@@ -177,5 +178,184 @@ describe('Provider configuration file store', () => {
     await writeFile(invalid, 'version: [')
     await expect(store.bind(invalid)).rejects.toThrow()
     expect((await store.read()).path).toBe(before.path)
+  })
+})
+
+describe('Provider model discovery', () => {
+  const draft = {
+    base_url: 'https://draft.example/v1/',
+    api_format: 'openai-responses',
+    api_key: 'draft-key',
+  }
+  const response = (data: unknown) =>
+    new Response(JSON.stringify(data), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  test('discovers with an unsaved connection without changing files, secrets or runtime', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const before = await store.read()
+    const secretsBefore = new Map(values)
+    const request = vi.fn().mockResolvedValue(
+      response({
+        data: [{ id: 'z' }, { id: 'a' }, { id: 'z' }, { id: '  a ' }, { id: '' }, null],
+      })
+    )
+    vi.stubGlobal('fetch', request)
+    expect(await store.discover('new-provider', { ...draft, models: [{ model_id: '' }] })).toEqual([
+      'a',
+      'z',
+    ])
+    expect(request).toHaveBeenCalledWith(
+      'https://draft.example/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer draft-key' },
+        redirect: 'error',
+        signal: expect.any(AbortSignal),
+      })
+    )
+    await expect(readFile(join(directory, 'model.yml'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect((await store.read()).revision).toBe(before.revision)
+    expect((await store.runtime()).models).toEqual([])
+    expect(values).toEqual(secretsBefore)
+  })
+
+  test('uses the stored encrypted key when the current form leaves it blank', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const initial = await store.read()
+    await store.save(initial.revision, parseModelConfiguration(YAML).config.providers)
+    const secretsBefore = new Map(values)
+    const request = vi.fn().mockResolvedValue(response({ data: [] }))
+    vi.stubGlobal('fetch', request)
+    await store.discover('relay', { ...draft, api_key: '' })
+    expect(request).toHaveBeenCalledWith(
+      'https://draft.example/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer secret-not-for-output' },
+      })
+    )
+    expect((await store.runtime()).models[0].provider.base_url).toBe('https://relay.example/v1')
+    expect(values).toEqual(secretsBefore)
+  })
+
+  test('a replacement draft key takes precedence but does not rotate the saved key', async () => {
+    await writeFile(join(directory, 'model.yml'), YAML)
+    const store = new ModelConfigurationStore(directory, secrets)
+    await store.read()
+    const request = vi.fn().mockResolvedValue(response({ data: [] }))
+    vi.stubGlobal('fetch', request)
+    await store.discover('relay', draft)
+    expect(request).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer draft-key' },
+      })
+    )
+    expect((await store.runtime()).models[0].provider.api_key).toBe('secret-not-for-output')
+    expect(await readFile(join(directory, 'model.yml'), 'utf8')).toBe(YAML)
+  })
+
+  test('retains saved-provider discovery for older callers', async () => {
+    await writeFile(join(directory, 'model.yml'), YAML)
+    const store = new ModelConfigurationStore(directory, secrets)
+    await store.read()
+    const request = vi.fn().mockResolvedValue(response({ data: [] }))
+    vi.stubGlobal('fetch', request)
+    await store.discover('relay')
+    expect(request).toHaveBeenCalledWith(
+      'https://relay.example/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer secret-not-for-output' },
+      })
+    )
+  })
+
+  test('supports a custom model-list path, key header and unauthenticated local connections', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const request = vi.fn().mockImplementation(async () => response({ data: [] }))
+    vi.stubGlobal('fetch', request)
+    await store.discover('new', {
+      ...draft,
+      models_path: '/catalog',
+      models_api_key_header: 'X-Api-Key',
+    })
+    expect(request).toHaveBeenLastCalledWith(
+      'https://draft.example/v1/catalog',
+      expect.objectContaining({
+        headers: { 'X-Api-Key': 'draft-key' },
+      })
+    )
+    await store.discover('local', {
+      ...draft,
+      base_url: 'http://127.0.0.1:11434/v1',
+      api_key: undefined,
+    })
+    expect(request).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:11434/v1/models',
+      expect.objectContaining({ headers: {} })
+    )
+  })
+
+  test('does not trust a renderer-supplied credential reference', async () => {
+    values.set('wework-model-key.other', 'other-provider-secret')
+    const store = new ModelConfigurationStore(directory, secrets)
+    const request = vi.fn().mockResolvedValue(response({ data: [] }))
+    vi.stubGlobal('fetch', request)
+    await store.discover('new', {
+      ...draft,
+      api_key: undefined,
+      api_key_ref: 'wework-model-key.other',
+    })
+    expect(request).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: {} })
+    )
+  })
+
+  test('invalid draft URLs, keys and paths fail before issuing a request', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const request = vi.fn()
+    vi.stubGlobal('fetch', request)
+    for (const input of [
+      null,
+      [],
+      { ...draft, base_url: 'file:///etc/passwd' },
+      { ...draft, base_url: 'https://user:secret@relay.example' },
+      { ...draft, api_key: 123 },
+      { ...draft, models_path: '//other.example/models' },
+    ])
+      await expect(store.discover('new', input)).rejects.toThrow()
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  test('missing stored credentials require a replacement key instead of silently using no auth', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const initial = await store.read()
+    await store.save(initial.revision, parseModelConfiguration(YAML).config.providers)
+    values.clear()
+    const request = vi.fn().mockResolvedValue(response({ data: [] }))
+    vi.stubGlobal('fetch', request)
+    await expect(store.discover('relay', { ...draft, api_key: undefined })).rejects.toThrow(
+      /saved API key/
+    )
+    expect(request).not.toHaveBeenCalled()
+    await expect(store.discover('relay', draft)).resolves.toEqual([])
+  })
+
+  test('sanitizes request failures and rejects invalid, null and oversized responses', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const request = vi.fn().mockRejectedValue(new Error('network draft-key details'))
+    vi.stubGlobal('fetch', request)
+    await expect(store.discover('new', draft)).rejects.toThrow(/failed or timed out/)
+    request.mockResolvedValue(new Response('secret server body', { status: 401 }))
+    await expect(store.discover('new', draft)).rejects.toThrow(/HTTP 401/)
+    request.mockResolvedValue(new Response('not-json'))
+    await expect(store.discover('new', draft)).rejects.toThrow(/not valid JSON/)
+    request.mockResolvedValue(response(null))
+    await expect(store.discover('new', draft)).rejects.toThrow(/data array/)
+    request.mockResolvedValue(new Response('{}', { headers: { 'content-length': '3000000' } }))
+    await expect(store.discover('new', draft)).rejects.toThrow(/too large/)
   })
 })

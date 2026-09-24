@@ -307,13 +307,39 @@ export class ModelConfigurationStore {
     })
   }
 
-  async discover(providerId: string): Promise<string[]> {
+  async discover(providerId: string, draft?: unknown): Promise<string[]> {
     const connection = await this.serial(async () => {
-      const provider = this.lastGood?.config.providers.find(entry => entry.id === providerId)
-      if (!provider) throw new Error('Save the provider before retrieving its models')
+      const saved = this.lastGood?.config.providers.find(entry => entry.id === providerId)
+      let provider = saved
+      if (draft !== undefined) {
+        if (!draft || typeof draft !== 'object' || Array.isArray(draft))
+          throw new Error('Model discovery requires connection settings')
+        const input = draft as Record<string, unknown>
+        // Validate only connection fields: unfinished model rows must not block discovery.
+        // Never trust a credential reference supplied by the renderer or persist a draft here.
+        provider = validateModelConfiguration({
+          version: 1,
+          providers: [
+            {
+              id: providerId,
+              name: 'Model discovery',
+              base_url: input.base_url,
+              api_format: input.api_format,
+              api_key: input.api_key === '' ? undefined : input.api_key,
+              models_path: input.models_path,
+              models_api_key_header: input.models_api_key_header,
+              models: [],
+            },
+          ],
+        }).providers[0]
+      }
+      if (!provider) throw new Error('Enter the connection address before retrieving models')
       const apiKey =
         provider.api_key ??
-        (provider.api_key_ref ? await this.secrets.get(provider.api_key_ref) : null)
+        saved?.api_key ??
+        (saved?.api_key_ref ? await this.secrets.get(saved.api_key_ref) : null)
+      if (saved?.api_key_ref && !apiKey)
+        throw new Error('The saved API key is unavailable. Enter it again to retrieve models.')
       return { provider, apiKey }
     })
     const { provider, apiKey } = connection
@@ -350,8 +376,12 @@ export class ModelConfigurationStore {
         if (size > MAX_MODEL_CONFIGURATION_BYTES) throw new Error('Model list is too large')
         chunks.push(chunk.value)
       }
+    } catch {
+      throw new Error(
+        'Model list could not be read or is too large. Manual model entry is still available.'
+      )
     } finally {
-      await reader.cancel()
+      await reader.cancel().catch(() => {})
     }
     let body: { data?: unknown }
     try {
@@ -359,7 +389,8 @@ export class ModelConfigurationStore {
     } catch {
       throw new Error('Model list is not valid JSON')
     }
-    if (!Array.isArray(body.data)) throw new Error('Model list must contain a data array')
+    if (!body || typeof body !== 'object' || !Array.isArray(body.data))
+      throw new Error('Model list must contain a data array')
     return [
       ...new Set(
         body.data.flatMap(item =>

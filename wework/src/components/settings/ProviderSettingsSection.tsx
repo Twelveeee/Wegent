@@ -1,11 +1,10 @@
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
-import { ChevronDown, FileCode2, Loader2, Plus, RefreshCw } from 'lucide-react'
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { ChevronDown, Loader2, Plus } from 'lucide-react'
 import { useTranslation } from '@/hooks/useTranslation'
 import { invokeDesktopHost } from '@/api/dsh/desktopHost'
 import { isElectronRuntime } from '@/lib/runtime-environment'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import {
-  chooseProviderConfiguration,
   getProviderConfigurationState,
   initializeProviderModelConfiguration,
   migrateLegacyProviderModels,
@@ -111,79 +110,37 @@ export function ProviderSettingsSection() {
           {t('addProvider')}
         </button>
       </div>
-      <div className="space-y-2 rounded-lg bg-surface p-3">
-        <p
-          className="break-all font-mono text-xs text-text-secondary"
-          data-testid="provider-file-path"
+      {!snapshot && <p className="text-sm text-text-secondary">{t('loading')}</p>}
+      {legacyCount > 0 && (
+        <button
+          type="button"
+          className={BUTTON}
+          data-testid="provider-migrate"
+          disabled={!snapshot || pending || !!editor || !!loadError}
+          onClick={() =>
+            setConfirmation({
+              title: t('migrate'),
+              description: t('migrateDescription', { count: legacyCount }),
+              run: async () => {
+                if (snapshot) await migrateLegacyProviderModels(snapshot)
+              },
+            })
+          }
         >
-          {snapshot?.path ?? t('loading')}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={BUTTON}
-            data-testid="provider-file-choose"
-            disabled={pending || !!editor}
-            onClick={() =>
-              setConfirmation({
-                title: t('chooseFile'),
-                description: t('chooseDescription'),
-                run: chooseProviderConfiguration,
-              })
-            }
-          >
-            <FileCode2 className="h-4 w-4" />
-            {t('chooseFile')}
-          </button>
-          <button
-            type="button"
-            className={BUTTON}
-            data-testid="provider-file-open"
-            disabled={pending || !!editor}
-            onClick={() =>
-              void perform(async () => {
-                await invokeDesktopHost('modelConfiguration.open')
-              })
-            }
-          >
-            {t('openFile')}
-          </button>
-          <button
-            type="button"
-            className={BUTTON}
-            data-testid="provider-file-reload"
-            disabled={pending || !!editor}
-            onClick={() => void perform(reloadProviderConfiguration)}
-          >
-            {pending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            {t('reload')}
-          </button>
-          {legacyCount > 0 && (
-            <button
-              type="button"
-              className={BUTTON}
-              data-testid="provider-migrate"
-              disabled={!snapshot || pending || !!editor || !!loadError}
-              onClick={() =>
-                setConfirmation({
-                  title: t('migrate'),
-                  description: t('migrateDescription', { count: legacyCount }),
-                  run: async () => {
-                    if (snapshot) await migrateLegacyProviderModels(snapshot)
-                  },
-                })
-              }
-            >
-              {t('migrateCount', { count: legacyCount })}
-            </button>
-          )}
-        </div>
-        <p className="text-xs text-text-secondary">{t('fileHint')}</p>
-      </div>
+          {t('migrateCount', { count: legacyCount })}
+        </button>
+      )}
+      {loadError && !editor && (
+        <button
+          type="button"
+          className={BUTTON}
+          data-testid="provider-retry"
+          disabled={pending}
+          onClick={() => void perform(reloadProviderConfiguration)}
+        >
+          {t('retry')}
+        </button>
+      )}
       {(error || loadError) && (
         <p
           role="alert"
@@ -324,35 +281,47 @@ function ProviderEditor({
 }) {
   const { t } = useTranslation('modelConnections')
   const [draft, setDraft] = useState<ProviderDraft>(initial)
-  const [batch, setBatch] = useState('')
-  const [discovered, setDiscovered] = useState<string[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [discovered, setDiscovered] = useState<string[] | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const discoverySequence = useRef(0)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [discard, setDiscard] = useState(false)
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || !!batch.trim()
-  const patch = (value: Partial<ProviderDraft>) => setDraft(current => ({ ...current, ...value }))
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial)
+  useEffect(
+    () => () => {
+      discoverySequence.current += 1
+    },
+    []
+  )
+  const patch = (value: Partial<ProviderDraft>) => {
+    if (
+      ['base_url', 'api_key', 'api_format', 'models_path', 'models_api_key_header'].some(
+        key => key in value
+      )
+    ) {
+      // A response for an older address/key must never replace the current connection's list.
+      discoverySequence.current += 1
+      setDiscovered(null)
+      setDiscovering(false)
+      setDiscoveryError(null)
+    }
+    setDraft(current => ({ ...current, ...value }))
+  }
   const patchModel = (id: string, value: Partial<ProviderModel>) =>
     setDraft(current => ({
       ...current,
       models: current.models.map(model => (model.id === id ? { ...model, ...value } : model)),
     }))
 
-  function withModels(ids: string[]): ProviderDraft {
-    const seen = new Set(draft.models.map(model => model.model_id))
-    const additions = ids.map(id => id.trim()).filter(id => id && !seen.has(id) && !!seen.add(id))
-    return {
-      ...draft,
-      models: [
-        ...draft.models,
-        ...additions.map(model_id => ({ id: crypto.randomUUID(), model_id })),
-      ],
-    }
-  }
-  function appendModels(ids: string[]) {
-    setDraft(withModels(ids))
-    setBatch('')
-    setSelected(new Set())
+  function appendModel(modelId = '') {
+    const model_id = modelId.trim()
+    setDraft(current => {
+      if (model_id && current.models.some(model => model.model_id.trim() === model_id))
+        return current
+      return { ...current, models: [...current.models, { id: crypto.randomUUID(), model_id }] }
+    })
   }
 
   async function save(event: FormEvent) {
@@ -360,7 +329,7 @@ function ProviderEditor({
     setPending(true)
     setError(null)
     try {
-      const next = batch.trim() ? withModels(batch.split(/[\n,]+/)) : draft
+      const next = draft
       const found = snapshot.providers.some(provider => provider.id === initial.id)
       const providers = found
         ? snapshot.providers.map(provider => (provider.id === initial.id ? next : provider))
@@ -375,16 +344,27 @@ function ProviderEditor({
   }
 
   async function discover() {
-    setPending(true)
-    setError(null)
+    const sequence = ++discoverySequence.current
+    setDiscovering(true)
+    setDiscovered(null)
+    setDiscoveryError(null)
     try {
-      setDiscovered(
-        await invokeDesktopHost<string[]>('modelConfiguration.discover', { providerId: initial.id })
-      )
+      const models = await invokeDesktopHost<string[]>('modelConfiguration.discover', {
+        providerId: initial.id,
+        provider: {
+          base_url: draft.base_url.trim(),
+          api_key: draft.api_key,
+          api_format: draft.api_format,
+          models_path: draft.models_path,
+          models_api_key_header: draft.models_api_key_header,
+        },
+      })
+      if (sequence === discoverySequence.current) setDiscovered(models)
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : t('failed'))
+      if (sequence === discoverySequence.current)
+        setDiscoveryError(failure instanceof Error ? failure.message : t('failed'))
     } finally {
-      setPending(false)
+      if (sequence === discoverySequence.current) setDiscovering(false)
     }
   }
 
@@ -521,93 +501,62 @@ function ProviderEditor({
             type="button"
             className={BUTTON}
             data-testid="provider-discover"
-            disabled={
-              pending || dirty || !snapshot.providers.some(provider => provider.id === initial.id)
-            }
+            disabled={pending || discovering || !validDiscoveryUrl(draft.base_url)}
             onClick={() => void discover()}
           >
-            {t('discover')}
+            {discovering && <Loader2 className="h-4 w-4 animate-spin" />}
+            {discovering ? t('discovering') : t('discover')}
           </button>
         </div>
         <p className="text-xs text-text-secondary">{t('discoveryHint')}</p>
-        {discovered.length > 0 && (
+        {discoveryError && (
+          <p role="alert" data-testid="provider-discovery-error" className="text-sm text-red-500">
+            {discoveryError}
+          </p>
+        )}
+        {discovered?.length === 0 && (
+          <p data-testid="provider-discovery-empty" className="text-sm text-text-secondary">
+            {t('discoveryEmpty')}
+          </p>
+        )}
+        {discovered && discovered.length > 0 && (
           <div
-            className="space-y-2 rounded-md bg-surface p-3"
+            className="max-h-48 space-y-1 overflow-y-auto rounded-md bg-surface p-3"
             data-testid="provider-discovered-models"
           >
-            <div className="max-h-48 overflow-y-auto">
-              {discovered.map(id => {
-                const exists = draft.models.some(model => model.model_id === id)
-                return (
-                  <label
-                    key={id}
-                    className="flex min-h-8 items-center gap-2 text-sm text-text-primary"
+            {discovered.map(id => {
+              const exists = draft.models.some(model => model.model_id.trim() === id)
+              return (
+                <div
+                  key={id}
+                  className="flex min-h-9 items-center justify-between gap-3 text-sm text-text-primary"
+                >
+                  <span className="min-w-0 break-all">{id}</span>
+                  <button
+                    type="button"
+                    className={`${BUTTON} shrink-0`}
+                    data-testid={`provider-discovered-${id}`}
+                    aria-label={`${t('addModel')} ${id}`}
+                    disabled={exists || pending}
+                    onClick={() => appendModel(id)}
                   >
-                    <input
-                      type="checkbox"
-                      data-testid={`provider-discovered-${id}`}
-                      checked={exists || selected.has(id)}
-                      disabled={exists}
-                      onChange={event =>
-                        setSelected(current => {
-                          const next = new Set(current)
-                          if (event.target.checked) next.add(id)
-                          else next.delete(id)
-                          return next
-                        })
-                      }
-                    />
-                    <span className="break-all">{id}</span>
-                    {exists && (
-                      <span className="text-xs text-text-secondary">{t('alreadyAdded')}</span>
-                    )}
-                  </label>
-                )
-              })}
-            </div>
-            <button
-              type="button"
-              className={BUTTON}
-              data-testid="provider-add-selected"
-              disabled={!selected.size}
-              onClick={() => appendModels([...selected])}
-            >
-              {t('addSelected', { count: selected.size })}
-            </button>
+                    {exists ? t('alreadyAdded') : t('addModel')}
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
-        <label className="block space-y-1 text-sm text-text-secondary">
-          {t('batch')}
-          <textarea
-            data-testid="provider-batch-models"
-            className={`${INPUT} font-mono`}
-            rows={3}
-            value={batch}
-            onChange={event => setBatch(event.target.value)}
-            placeholder={t('batchPlaceholder')}
-          />
-        </label>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className={BUTTON}
-            data-testid="provider-append-models"
-            disabled={!batch.trim()}
-            onClick={() => appendModels(batch.split(/[\n,]+/))}
-          >
-            {t('append')}
-          </button>
-          <button
-            type="button"
-            className={BUTTON}
-            data-testid="provider-model-add"
-            onClick={() =>
-              patch({ models: [...draft.models, { id: crypto.randomUUID(), model_id: '' }] })
-            }
-          >
-            {t('manual')}
-          </button>
-        </div>
+        <button
+          type="button"
+          className={BUTTON}
+          data-testid="provider-model-add"
+          disabled={pending}
+          onClick={() => appendModel()}
+        >
+          <Plus className="h-4 w-4" />
+          {t('manual')}
+        </button>
         <div className="divide-y divide-border">
           {draft.models.map(model => (
             <div
@@ -655,7 +604,7 @@ function ProviderEditor({
                   {t('remove')}
                 </button>
               </div>
-              <ModelAdvancedFields
+              <ModelFields
                 model={model}
                 provider={draft}
                 onChange={value => patchModel(model.id, value)}
@@ -704,7 +653,7 @@ function ProviderEditor({
   )
 }
 
-function ModelAdvancedFields({
+function ModelFields({
   model,
   provider,
   onChange,
@@ -714,7 +663,6 @@ function ModelAdvancedFields({
   onChange: (value: Partial<ProviderModel>) => void
 }) {
   const { t } = useTranslation('modelConnections')
-  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false)
   const format = model.api_format ?? provider.api_format
   const toolProfile = model.tool_profile ?? defaultLocalModelToolProfile(format)
   const entry =
@@ -726,117 +674,120 @@ function ModelAdvancedFields({
       contextWindow: model.context_window,
     })
   return (
-    <details>
-      <summary className="cursor-pointer text-xs text-text-secondary">{t('modelAdvanced')}</summary>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <label className="space-y-1 text-sm text-text-secondary">
-          {t('protocol')}
-          <select
-            className={INPUT}
-            data-testid={`provider-model-protocol-${model.id}`}
-            value={model.api_format ?? ''}
-            onChange={event =>
-              onChange({
-                api_format: (event.target.value as ProviderModel['api_format']) || undefined,
-                request_path: undefined,
-                tool_profile: undefined,
-                catalog_entry: undefined,
-              })
-            }
-          >
-            <option value="">{t('inherit')}</option>
-            {FORMATS.map(value => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-sm text-text-secondary">
-          {t('requestPath')}
-          <input
-            className={INPUT}
-            data-testid={`provider-model-path-${model.id}`}
-            value={model.request_path ?? ''}
-            placeholder={t('inherit')}
-            onChange={event => onChange({ request_path: event.target.value || undefined })}
-          />
-        </label>
-        <label className="space-y-1 text-sm text-text-secondary">
-          {t('contextWindow')}
-          <input
-            className={INPUT}
-            data-testid={`provider-model-context-${model.id}`}
-            type="number"
-            min={1}
-            value={model.context_window ?? ''}
-            placeholder={t('automatic')}
-            onChange={event =>
-              onChange({
-                context_window: event.target.value ? Number(event.target.value) : undefined,
-              })
-            }
-          />
-        </label>
-        <label className="space-y-1 text-sm text-text-secondary">
-          {t('toolProfile')}
-          <select
-            className={INPUT}
-            data-testid={`provider-model-tools-${model.id}`}
-            value={model.tool_profile ?? ''}
-            onChange={event =>
-              onChange({
-                tool_profile: (event.target.value as ProviderModel['tool_profile']) || undefined,
-              })
-            }
-          >
-            <option value="">{t('automatic')}</option>
-            {(format === 'openai-responses'
-              ? ['custom', 'function', 'shell']
-              : ['function', 'shell']
-            ).map(value => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-        </label>
-        {format === 'openai-responses' && (
+    <div className="space-y-3">
+      <CustomModelCapabilitiesForm
+        entry={entry}
+        contextWindow={model.context_window?.toString() ?? ''}
+        onContextWindowChange={value => {
+          const context_window = value ? Number(value) : undefined
+          onChange({
+            context_window,
+            ...(model.catalog_entry
+              ? {
+                  catalog_entry: {
+                    ...model.catalog_entry,
+                    context_window: context_window ?? 272_000,
+                    max_context_window: context_window ?? 272_000,
+                  },
+                }
+              : {}),
+          })
+        }}
+        onChange={catalog_entry => onChange({ catalog_entry })}
+      />
+      <details>
+        <summary className="cursor-pointer text-xs text-text-secondary">
+          {t('modelAdvanced')}
+        </summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="space-y-1 text-sm text-text-secondary">
-            {t('toolCompatibility')}
+            {t('protocol')}
             <select
               className={INPUT}
-              data-testid={`provider-model-compatibility-${model.id}`}
-              value={model.codex_tool_compatibility ?? 'native'}
+              data-testid={`provider-model-protocol-${model.id}`}
+              value={model.api_format ?? ''}
               onChange={event =>
                 onChange({
-                  codex_tool_compatibility: event.target
-                    .value as ProviderModel['codex_tool_compatibility'],
+                  api_format: (event.target.value as ProviderModel['api_format']) || undefined,
+                  request_path: undefined,
+                  tool_profile: undefined,
+                  catalog_entry: undefined,
                 })
               }
             >
-              <option value="native">native</option>
-              <option value="standard">standard</option>
+              <option value="">{t('inherit')}</option>
+              {FORMATS.map(value => (
+                <option key={value}>{value}</option>
+              ))}
             </select>
           </label>
-        )}
-      </div>
-      <button
-        type="button"
-        className={`${BUTTON} mt-3`}
-        data-testid={`provider-model-capabilities-${model.id}`}
-        onClick={() => setCapabilitiesOpen(value => !value)}
-      >
-        {t('capabilities')}
-      </button>
-      {capabilitiesOpen && (
-        <div className="mt-3">
-          <CustomModelCapabilitiesForm
-            entry={entry}
-            contextWindow={model.context_window?.toString() ?? ''}
-            onContextWindowChange={value =>
-              onChange({ context_window: value ? Number(value) : undefined })
-            }
-            onChange={catalog_entry => onChange({ catalog_entry })}
-          />
+          <label className="space-y-1 text-sm text-text-secondary">
+            {t('requestPath')}
+            <input
+              className={INPUT}
+              data-testid={`provider-model-path-${model.id}`}
+              value={model.request_path ?? ''}
+              placeholder={t('inherit')}
+              onChange={event => onChange({ request_path: event.target.value || undefined })}
+            />
+          </label>
+          <label className="space-y-1 text-sm text-text-secondary">
+            {t('toolProfile')}
+            <select
+              className={INPUT}
+              data-testid={`provider-model-tools-${model.id}`}
+              value={model.tool_profile ?? ''}
+              onChange={event =>
+                onChange({
+                  tool_profile: (event.target.value as ProviderModel['tool_profile']) || undefined,
+                })
+              }
+            >
+              <option value="">{t('automatic')}</option>
+              {(format === 'openai-responses'
+                ? ['custom', 'function', 'shell']
+                : ['function', 'shell']
+              ).map(value => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          {format === 'openai-responses' && (
+            <label className="space-y-1 text-sm text-text-secondary">
+              {t('toolCompatibility')}
+              <select
+                className={INPUT}
+                data-testid={`provider-model-compatibility-${model.id}`}
+                value={model.codex_tool_compatibility ?? 'native'}
+                onChange={event =>
+                  onChange({
+                    codex_tool_compatibility: event.target
+                      .value as ProviderModel['codex_tool_compatibility'],
+                  })
+                }
+              >
+                <option value="native">native</option>
+                <option value="standard">standard</option>
+              </select>
+            </label>
+          )}
         </div>
-      )}
-    </details>
+      </details>
+    </div>
   )
+}
+
+function validDiscoveryUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim())
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    )
+  } catch {
+    return false
+  }
 }

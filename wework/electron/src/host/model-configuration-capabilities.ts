@@ -46,6 +46,6 @@ export function registerModelConfigurationCapabilities(
   })
   router.register('modelConfiguration.discover', async params => {
     if (typeof params.providerId !== 'string') throw new Error('Provider ID is required')
-    return store().discover(params.providerId)
+    return store().discover(params.providerId, params.provider)
   })
 }
