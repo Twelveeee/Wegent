@@ -7,12 +7,14 @@ on:
       - wework/**
       - .github/workflows/wework-provider-arm64.yml
       - .github/provider-arm64-fixes.patch
+      - .github/provider-arm64-fixes.patch.gz
       - .github/scripts/sign-wework-provider-preview.mjs
       - .github/scripts/fix-provider-editor-lifecycle.mjs
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: wework-provider-arm64-${{ github.ref }}
@@ -45,6 +47,15 @@ jobs:
           test "$(uname -m)" = arm64
           test -f wework/electron/src/host/model-configuration-store.ts
           test ! -f wework/src/features/model-settings/providerConfigClient.ts
+          if test -f .github/provider-arm64-fixes.patch.gz; then
+            python3 - <<'PATCH'
+          import gzip, hashlib
+          from pathlib import Path
+          patch = gzip.decompress(Path('.github/provider-arm64-fixes.patch.gz').read_bytes())
+          assert hashlib.sha256(patch).hexdigest() == '418910db174e164eb062098272a8640202eaf0dfa32fad9847e9855e7f13b26f'
+          Path('.github/provider-arm64-fixes.patch').write_bytes(patch)
+          PATCH
+          fi
           if test -f .github/provider-arm64-fixes.patch; then
             git apply --check .github/provider-arm64-fixes.patch
             git apply .github/provider-arm64-fixes.patch
@@ -69,7 +80,7 @@ jobs:
       - name: Format and identify preview version
         run: |
           node .github/scripts/fix-provider-editor-lifecycle.mjs
-          node wework/scripts/sync-desktop-release-version.mjs 0.5.4-provider.1
+          node wework/scripts/sync-desktop-release-version.mjs 0.5.4-provider.2
           node --input-type=module <<'NODE'
           import { execFileSync } from 'node:child_process'
           import { existsSync } from 'node:fs'
@@ -122,28 +133,57 @@ jobs:
               for path in paths:
                   assert path.startswith('wework/') and Path(path).is_file()
                   entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': Path(path).read_text()})
-              patch = Path('.github/provider-arm64-fixes.patch')
-              if patch.exists(): entries.append({'path': str(patch), 'mode': '100644', 'type': 'blob', 'sha': None})
+              patches = [Path('.github/provider-arm64-fixes.patch'), Path('.github/provider-arm64-fixes.patch.gz')]
+              for patch in patches:
+                  if subprocess.run(['git', 'ls-files', '--error-unmatch', str(patch)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                      entries.append({'path': str(patch), 'mode': '100644', 'type': 'blob', 'sha': None})
               tree = api('git/trees', {'base_tree': api(f'git/commits/{parent}')['tree']['sha'], 'tree': entries})
-              commit = api('git/commits', {'message': 'fix(wework): verify provider editor lifecycle and native model configuration integration', 'tree': tree['sha'], 'parents': [parent]})
+              commit = api('git/commits', {'message': 'fix(wework): simplify provider settings and enable unsaved connection discovery', 'tree': tree['sha'], 'parents': [parent]})
               sha = commit['sha']
               subprocess.run(['gh', 'api', f'repos/{repo}/git/refs/heads/{branch}', '--method', 'PATCH', '--input', '-'], input=json.dumps({'sha': sha, 'force': False}).encode(), check=True)
               subprocess.run(['git', 'fetch', 'origin', sha], check=True)
               subprocess.run(['git', 'reset', '--mixed', sha], check=True)
-              if patch.exists(): patch.unlink()
+              for patch in patches:
+                  if patch.exists(): patch.unlink()
           with open(os.environ['GITHUB_ENV'], 'a') as stream: stream.write(f'WEWORK_SOURCE_SHA={sha}\n')
           PY
-      - uses: actions/cache/restore@v4
-        id: executor
+      - uses: actions/download-artifact@v4
+        id: previous-executor
+        continue-on-error: true
         with:
-          path: executor/target/aarch64-apple-darwin/release/wegent-executor
-          key: provider-executor-arm64-01971fc-v1
+          name: WeWork-0.5.4-provider.1-macos-arm64-ZIP
+          run-id: 35852347986
+          github-token: ${{ github.token }}
+          path: previous-provider-package
+      - name: Reuse unchanged, hash-verified native executor
+        id: executor
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, os, zipfile
+          from pathlib import Path
+          candidates = list(Path('previous-provider-package').glob('*.zip'))
+          reused = False
+          if candidates:
+              assert len(candidates) == 1
+              archive = candidates[0]
+              assert hashlib.sha256(archive.read_bytes()).hexdigest() == '0b5b23d9b814117b459cc23b0ca7b3c0174ffa0937955a96af4022a9bdd61e05'
+              with zipfile.ZipFile(archive) as z:
+                  binary = z.read('WeWork.app/Contents/Resources/bin/wegent-executor')
+              assert hashlib.sha256(binary).hexdigest() == '25d81d22071f0505d91ea45a6b6d8561321d9715008072dfb761fa6242b9ec92'
+              target = Path('executor/target/aarch64-apple-darwin/release/wegent-executor')
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(binary)
+              target.chmod(0o755)
+              reused = True
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'reused={str(reused).lower()}\n')
+          PYCODE
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.executor.outputs.cache-hit != 'true'
+        if: steps.executor.outputs.reused != 'true'
         with:
           targets: aarch64-apple-darwin
-      - name: Build native executor if needed
-        if: steps.executor.outputs.cache-hit != 'true'
+      - name: Build native executor when the previous artifact is unavailable
+        if: steps.executor.outputs.reused != 'true'
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/executor/target
         run: cargo build --locked --release --manifest-path executor/Cargo.toml --bin wegent-executor --target aarch64-apple-darwin
@@ -171,13 +211,26 @@ jobs:
           cp wework/electron/release-installer/*.dmg provider-delivery/
           cp wework/electron/release-installer/*.zip provider-delivery/
           for disk in provider-delivery/*.dmg; do hdiutil verify "$disk"; done
-          printf 'Source: %s\nArchitecture: macOS arm64\nVersion: 0.5.4-provider.1\nSigning: ad-hoc; not Apple Developer ID signed or notarized\nOfficial update publishing: disabled\n' "$WEWORK_SOURCE_SHA" > provider-delivery/BUILD-INFO.txt
+          printf 'Source: %s\nArchitecture: macOS arm64\nVersion: 0.5.4-provider.2\nSigning: ad-hoc; not Apple Developer ID signed or notarized\nOfficial update publishing: disabled\n' "$WEWORK_SOURCE_SHA" > provider-delivery/BUILD-INFO.txt
           git archive --format=tar.gz HEAD -o provider-delivery/source.tar.gz
           (cd provider-delivery && shasum -a 256 *.dmg *.zip source.tar.gz > SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
-          name: WeWork-Providers-macOS-arm64
-          path: provider-delivery/
+          name: WeWork-0.5.4-provider.2-macos-arm64-DMG
+          path: |
+            provider-delivery/*.dmg
+            provider-delivery/BUILD-INFO.txt
+            provider-delivery/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WeWork-0.5.4-provider.2-macos-arm64-ZIP
+          path: |
+            provider-delivery/*.zip
+            provider-delivery/BUILD-INFO.txt
+            provider-delivery/SHA256SUMS.txt
           compression-level: 0
           retention-days: 30
           if-no-files-found: error
