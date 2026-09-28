@@ -3,6 +3,14 @@ name: Wework App
 on:
   workflow_dispatch:
     inputs:
+      build_profile:
+        description: "Release build or an ad-hoc signed macOS ARM64 test DMG"
+        type: choice
+        options:
+          - release
+          - macos-arm64-test
+        required: true
+        default: release
       channel:
         description: "Release channel. Stable releases also advance the Beta channel."
         type: choice
@@ -29,8 +37,130 @@ permissions:
   contents: write
 
 jobs:
+  test-build:
+    name: Build macOS arm64 test DMG
+    if: inputs.build_profile == 'macos-arm64-test'
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+      NODE_OPTIONS: --max-old-space-size=8192
+      CARGO_BUILD_TARGET: aarch64-apple-darwin
+      WEWORK_RELEASE_PLATFORM: macos
+      WEWORK_RELEASE_ARCH: arm64
+      WEWORK_CODEX_TARGET: aarch64-apple-darwin
+      WEWORK_DWS_TARGET: aarch64-apple-darwin
+      WEWORK_ELECTRON_DEPENDENCIES_READY: "true"
+      VITE_WEWORK_RUNTIME_MODE: local-first
+      VITE_WEWORK_E2E: "false"
+      VITE_WEWORK_RELEASE_CHANNEL: beta
+      WEWORK_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Reject release publishing for test builds
+        env:
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: test "$PUBLISH_RELEASE" != "true"
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-sccache
+        with:
+          save-cache: "true"
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+          architecture: arm64
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            wework/electron/pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: |
+          test "$(uname -m)" = arm64
+          pnpm install --frozen-lockfile
+          pnpm --dir wework/electron install --frozen-lockfile
+
+      - name: Verify cloud model reasoning controls
+        run: |
+          pnpm --filter wework typecheck
+          pnpm --filter wework test \
+            src/lib/model-ui.test.ts \
+            src/features/workbench/runtimeModelSelection.test.ts
+          pnpm --filter @wegent/collaboration test src/controls/ModelSelector.test.tsx
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Verify shared model catalog aliases
+        run: uv run --no-project --with pytest pytest shared/tests/test_codex_model_catalog.py -q
+
+      - name: Prepare and compile desktop application
+        run: |
+          pnpm --filter wework prepare:electron
+          pnpm --dir wework/electron prepare:package
+          pnpm --dir wework/electron build
+
+      - name: Package ad-hoc signed ARM64 DMG
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          node --input-type=module -e \
+            "import { prepareSignedComponents } from './wework/electron/scripts/prepare-signed-components.mjs'; await prepareSignedComponents()"
+          pnpm --dir wework/electron exec electron-builder \
+            --config electron-builder.config.cjs --mac dmg --arm64 --publish never \
+            --config.mac.identity=- --config.mac.notarize=false
+
+      - name: Verify installer and record source
+        run: |
+          set -euo pipefail
+          app=wework/electron/release-installer/mac-arm64/WeWork.app
+          codesign --verify --deep --strict "$app"
+          lipo "$app/Contents/MacOS/WeWork" -verify_arch arm64
+          for disk in wework/electron/release-installer/*.dmg; do
+            hdiutil verify "$disk"
+          done
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const { version } = JSON.parse(readFileSync('wework/package.json', 'utf8'))
+          writeFileSync('wework/electron/release-installer/BUILD-INFO.txt', [
+            `Source: ${process.env.GITHUB_SHA}`,
+            `Version: ${version}`,
+            'Architecture: macOS arm64',
+            'Signing: ad-hoc; not Apple Developer ID signed or notarized',
+            'Release publishing and update channels: unchanged',
+            '',
+          ].join('\n'))
+          NODE
+          cd wework/electron/release-installer
+          shasum -a 256 *.dmg > SHA256SUMS.txt
+
+      - name: Upload test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: wework-test-macos-arm64-${{ github.run_id }}
+          path: |
+            wework/electron/release-installer/*.dmg
+            wework/electron/release-installer/BUILD-INFO.txt
+            wework/electron/release-installer/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
   prepare-release:
     name: Prepare build
+    if: inputs.build_profile != 'macos-arm64-test'
     runs-on: ubuntu-latest
     outputs:
       release_sha: ${{ steps.version-files.outputs.release_sha }}
