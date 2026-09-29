@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createProviderFileSettingsScenario } from './provider-file-settings.mjs'
 
-export async function createDesktopScenario({ resultDir, uiTimeoutMs }) {
+export async function createDesktopScenario({ resultDir, uiTimeoutMs, electronUserDataDirectory }) {
   const codexHome = join(resultDir, 'codex-account-login-home')
   await mkdir(codexHome, { recursive: true })
+  const providerSettings = await createProviderFileSettingsScenario({ electronUserDataDirectory })
 
   return {
     appEnvironment: {
@@ -35,6 +37,7 @@ export async function createDesktopScenario({ resultDir, uiTimeoutMs }) {
       )
       assert.ok(!snapshot.text.includes('auth.json'), 'Internal auth path leaked into account UI')
       assert.ok(!snapshot.text.includes('SHA-256'), 'Internal auth digest leaked into account UI')
+      await providerSettings.verify(control)
     },
 
     diagnostics() {

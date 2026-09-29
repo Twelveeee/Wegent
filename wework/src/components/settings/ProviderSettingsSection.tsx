@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
-import { ChevronDown, Loader2, Plus } from 'lucide-react'
+import { ChevronDown, FilePenLine, Loader2, Plus, RefreshCw } from 'lucide-react'
 import { useTranslation } from '@/hooks/useTranslation'
 import { invokeDesktopHost } from '@/api/dsh/desktopHost'
 import { isElectronRuntime } from '@/lib/runtime-environment'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
+import { Button } from '@/components/ui/button'
 import {
   getProviderConfigurationState,
   initializeProviderModelConfiguration,
@@ -34,7 +35,7 @@ const FORMATS = ['openai-responses', 'openai-chat-completions', 'anthropic-messa
 
 type ProviderDraft = ModelProvider & { api_key_configured?: boolean }
 
-/** Manage local provider connections without exposing file controls or changing cloud catalogs. */
+/** Manage local provider connections and their backing file independently of cloud catalogs. */
 export function ProviderSettingsSection() {
   const { t } = useTranslation('modelConnections')
   const { snapshot, error: loadError } = useSyncExternalStore(
@@ -98,11 +99,11 @@ export function ProviderSettingsSection() {
   }
 
   return (
-    <section data-testid="provider-settings-section" className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section data-testid="provider-settings-section">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="heading-small text-text-primary">{t('title')}</h3>
-          <p className="mt-1 text-sm text-text-secondary">{t('description')}</p>
+          <h2 className="text-base font-semibold text-text-primary">{t('title')}</h2>
+          <p className="mt-1 text-sm leading-6 text-text-secondary">{t('description')}</p>
         </div>
         <button
           type="button"
@@ -115,149 +116,198 @@ export function ProviderSettingsSection() {
           {t('addProvider')}
         </button>
       </div>
-      {!snapshot && <p className="text-sm text-text-secondary">{t('loading')}</p>}
-      {legacyCount > 0 && (
-        <button
-          type="button"
-          className={BUTTON}
-          data-testid="provider-migrate"
-          disabled={!snapshot || pending || !!editor || !!loadError}
-          onClick={() =>
-            setConfirmation({
-              title: t('migrate'),
-              description: t('migrateDescription', { count: legacyCount }),
-              run: async () => {
-                if (snapshot) await migrateLegacyProviderModels(snapshot)
-              },
-            })
-          }
-        >
-          {t('migrateCount', { count: legacyCount })}
-        </button>
-      )}
-      {loadError && !editor && (
-        <button
-          type="button"
-          className={BUTTON}
-          data-testid="provider-retry"
-          disabled={pending}
-          onClick={() => void perform(reloadProviderConfiguration)}
-        >
-          {t('retry')}
-        </button>
-      )}
-      {(error || loadError) && (
-        <p
-          role="alert"
-          data-testid="provider-settings-error"
-          className="break-words text-sm text-red-500"
-        >
-          {error || loadError}
-        </p>
-      )}
-      {editor ? (
-        <ProviderEditor
-          key={editor.provider.id}
-          initial={editor.provider}
-          snapshot={editor.snapshot}
-          onClose={() => setEditor(null)}
-        />
-      ) : (
-        <div className="divide-y divide-border">
-          {snapshot?.providers.map(provider => (
-            <details
-              key={provider.id}
-              data-testid={`provider-row-${provider.id}`}
-              className="py-3"
-              open
+      <div
+        data-testid="provider-settings-card"
+        className="mt-4 grid min-w-0 gap-3 rounded-lg border border-border bg-background p-4"
+      >
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="text-sm font-medium text-text-primary">{t('configurationFile')}</p>
+            {snapshot && (
+              <p
+                data-testid="provider-file-path"
+                className="mt-1 break-all font-mono text-xs text-text-secondary"
+              >
+                {snapshot.path}
+              </p>
+            )}
+            <p className="mt-1 text-xs leading-5 text-text-secondary">{t('fileHint')}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-11 md:h-8"
+              data-testid="provider-file-open"
+              disabled={pending || !!editor}
+              onClick={() =>
+                void perform(async () => {
+                  await invokeDesktopHost('modelConfiguration.open')
+                })
+              }
             >
-              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <ChevronDown className="h-4 w-4 shrink-0" />
-                  <span className="truncate text-sm font-medium text-text-primary">
-                    {provider.name}
-                  </span>
-                  <span className="text-xs text-text-secondary">
-                    {t('modelCount', { count: provider.models.length })}
-                  </span>
-                  {provider.enabled === false && (
-                    <span className="text-xs text-text-secondary">{t('disabled')}</span>
+              <FilePenLine aria-hidden="true" />
+              {t('openFile')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-11 md:h-8"
+              data-testid="provider-file-reload"
+              disabled={pending || !!editor}
+              onClick={() => void perform(reloadProviderConfiguration)}
+            >
+              <RefreshCw aria-hidden="true" />
+              {t('reloadFile')}
+            </Button>
+          </div>
+        </div>
+        {!snapshot && !loadError && <p className="text-sm text-text-secondary">{t('loading')}</p>}
+        {legacyCount > 0 && (
+          <button
+            type="button"
+            className={BUTTON}
+            data-testid="provider-migrate"
+            disabled={!snapshot || pending || !!editor || !!loadError}
+            onClick={() =>
+              setConfirmation({
+                title: t('migrate'),
+                description: t('migrateDescription', { count: legacyCount }),
+                run: async () => {
+                  if (snapshot) await migrateLegacyProviderModels(snapshot)
+                },
+              })
+            }
+          >
+            {t('migrateCount', { count: legacyCount })}
+          </button>
+        )}
+        {loadError && !editor && (
+          <button
+            type="button"
+            className={BUTTON}
+            data-testid="provider-retry"
+            disabled={pending}
+            onClick={() => void perform(reloadProviderConfiguration)}
+          >
+            {t('retry')}
+          </button>
+        )}
+        {(error || loadError) && (
+          <p
+            role="alert"
+            data-testid="provider-settings-error"
+            className="break-words text-sm text-red-500"
+          >
+            {error || loadError}
+          </p>
+        )}
+        {editor ? (
+          <ProviderEditor
+            key={editor.provider.id}
+            initial={editor.provider}
+            snapshot={editor.snapshot}
+            onClose={() => setEditor(null)}
+          />
+        ) : (
+          <div className="divide-y divide-border">
+            {snapshot?.providers.map(provider => (
+              <details
+                key={provider.id}
+                data-testid={`provider-row-${provider.id}`}
+                className="py-3"
+                open
+              >
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <ChevronDown className="h-4 w-4 shrink-0" />
+                    <span className="truncate text-sm font-medium text-text-primary">
+                      {provider.name}
+                    </span>
+                    <span className="text-xs text-text-secondary">
+                      {t('modelCount', { count: provider.models.length })}
+                    </span>
+                    {provider.enabled === false && (
+                      <span className="text-xs text-text-secondary">{t('disabled')}</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className={BUTTON}
+                      data-testid={`provider-edit-${provider.id}`}
+                      disabled={pending || !!loadError}
+                      onClick={event => {
+                        event.preventDefault()
+                        editProvider(provider)
+                      }}
+                    >
+                      {t('edit')}
+                    </button>
+                    <button
+                      type="button"
+                      className={BUTTON}
+                      data-testid={`provider-delete-${provider.id}`}
+                      disabled={pending || !!loadError}
+                      onClick={event => {
+                        event.preventDefault()
+                        if (snapshot)
+                          setConfirmation({
+                            title: t('deleteProvider'),
+                            description: t('deleteDescription', {
+                              name: provider.name,
+                              count: provider.models.length,
+                            }),
+                            run: () =>
+                              saveProviderConfiguration(
+                                snapshot.revision,
+                                snapshot.providers.filter(item => item.id !== provider.id)
+                              ),
+                          })
+                      }}
+                    >
+                      {t('delete')}
+                    </button>
+                  </div>
+                </summary>
+                <div className="mt-2 space-y-1 pl-6">
+                  <p className="break-all text-xs text-text-secondary">
+                    {provider.base_url} · {provider.api_format} ·{' '}
+                    {provider.api_key_configured
+                      ? t('keyConfigured')
+                      : provider.api_key_ref
+                        ? t('missingKey')
+                        : t('noKey')}
+                  </p>
+                  {provider.models.map(model => (
+                    <div
+                      key={model.id}
+                      className="flex min-h-8 flex-wrap items-center justify-between gap-2 text-sm"
+                      data-testid={`provider-model-${model.id}`}
+                    >
+                      <span className="text-text-primary">
+                        {model.display_name || model.model_id}
+                      </span>
+                      <span className="break-all font-mono text-xs text-text-secondary">
+                        {model.model_id}
+                        {model.enabled === false ? ` · ${t('disabled')}` : ''}
+                      </span>
+                    </div>
+                  ))}
+                  {provider.models.length === 0 && (
+                    <p className="text-sm text-text-secondary">{t('emptyModels')}</p>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    data-testid={`provider-edit-${provider.id}`}
-                    disabled={pending || !!loadError}
-                    onClick={event => {
-                      event.preventDefault()
-                      editProvider(provider)
-                    }}
-                  >
-                    {t('edit')}
-                  </button>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    data-testid={`provider-delete-${provider.id}`}
-                    disabled={pending || !!loadError}
-                    onClick={event => {
-                      event.preventDefault()
-                      if (snapshot)
-                        setConfirmation({
-                          title: t('deleteProvider'),
-                          description: t('deleteDescription', {
-                            name: provider.name,
-                            count: provider.models.length,
-                          }),
-                          run: () =>
-                            saveProviderConfiguration(
-                              snapshot.revision,
-                              snapshot.providers.filter(item => item.id !== provider.id)
-                            ),
-                        })
-                    }}
-                  >
-                    {t('delete')}
-                  </button>
-                </div>
-              </summary>
-              <div className="mt-2 space-y-1 pl-6">
-                <p className="break-all text-xs text-text-secondary">
-                  {provider.base_url} · {provider.api_format} ·{' '}
-                  {provider.api_key_configured
-                    ? t('keyConfigured')
-                    : provider.api_key_ref
-                      ? t('missingKey')
-                      : t('noKey')}
-                </p>
-                {provider.models.map(model => (
-                  <div
-                    key={model.id}
-                    className="flex min-h-8 flex-wrap items-center justify-between gap-2 text-sm"
-                    data-testid={`provider-model-${model.id}`}
-                  >
-                    <span className="text-text-primary">
-                      {model.display_name || model.model_id}
-                    </span>
-                    <span className="break-all font-mono text-xs text-text-secondary">
-                      {model.model_id}
-                      {model.enabled === false ? ` · ${t('disabled')}` : ''}
-                    </span>
-                  </div>
-                ))}
-                {provider.models.length === 0 && (
-                  <p className="text-sm text-text-secondary">{t('emptyModels')}</p>
-                )}
-              </div>
-            </details>
-          ))}
-          {snapshot?.providers.length === 0 && (
-            <p className="py-4 text-sm text-text-secondary">{t('empty')}</p>
-          )}
-        </div>
-      )}
+              </details>
+            ))}
+            {snapshot?.providers.length === 0 && (
+              <p className="py-4 text-sm text-text-secondary">{t('empty')}</p>
+            )}
+          </div>
+        )}
+      </div>
       <ConfirmDialog
         open={!!confirmation}
         title={confirmation?.title ?? ''}

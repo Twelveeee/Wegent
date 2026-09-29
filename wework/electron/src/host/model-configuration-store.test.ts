@@ -59,6 +59,43 @@ describe('Provider YAML schema', () => {
 })
 
 describe('Provider configuration file store', () => {
+  test('opening a fresh default file creates valid YAML without changing its revision', async () => {
+    const store = new ModelConfigurationStore(directory, secrets)
+    const before = await store.read()
+    const path = await store.ensureFile()
+    expect(path).toBe(join(directory, 'model.yml'))
+    expect(parseModelConfiguration(await readFile(path, 'utf8')).config).toEqual({
+      version: 1,
+      providers: [],
+    })
+    expect((await store.read()).revision).toBe(before.revision)
+  })
+
+  test('opening an existing or malformed file never rewrites its contents', async () => {
+    const path = join(directory, 'model.yml')
+    await writeFile(path, YAML)
+    const store = new ModelConfigurationStore(directory, secrets)
+    await store.read()
+    expect(await store.ensureFile()).toBe(path)
+    expect(await readFile(path, 'utf8')).toBe(YAML)
+    await writeFile(path, 'version: [')
+    expect((await store.read()).error).toBeTruthy()
+    expect(await store.ensureFile()).toBe(path)
+    expect(await readFile(path, 'utf8')).toBe('version: [')
+  })
+
+  test('opening a missing populated file does not replace it with an empty configuration', async () => {
+    const path = join(directory, 'model.yml')
+    await writeFile(path, YAML)
+    const store = new ModelConfigurationStore(directory, secrets)
+    await store.read()
+    await rm(path)
+    expect((await store.read()).error).toBeTruthy()
+    await expect(store.ensureFile()).rejects.toThrow(/restore it before opening/)
+    await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await store.runtime()).models).toHaveLength(2)
+  })
+
   test('creates a fresh configuration and shares one credential across models', async () => {
     const store = new ModelConfigurationStore(directory, secrets)
     const empty = await store.read()

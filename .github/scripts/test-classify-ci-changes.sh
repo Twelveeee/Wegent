@@ -496,6 +496,14 @@ wework_desktop_other_e2e_matrix={"include":[]}' \
     "$terminal_path"
 done
 
+assert_desktop_case "provider file settings reuse the model settings checkpoint" \
+  'wework_desktop_e2e=true
+wework_desktop_core_e2e=true
+wework_desktop_core_e2e_matrix={"include":[{"id":"core-17","name":"Core / shard 17","segments":"codex-account-login"}]}
+wework_desktop_other_e2e=false
+wework_desktop_other_e2e_matrix={"include":[]}' \
+  "wework/e2e/desktop/scenarios/provider-file-settings.mjs"
+
 assert_desktop_case "conversation cache selects guidance and conversation segments" \
   'wework_desktop_e2e=true
 wework_desktop_core_e2e=true

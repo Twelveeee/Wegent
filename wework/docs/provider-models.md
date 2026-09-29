@@ -12,11 +12,13 @@
 4. 在模型编辑区域直接调整模型能力和最大上下文；协议与工具兼容设置保留在低频设置中。
 5. 点击“保存连接”统一生效。取消未保存的编辑不会创建服务连接。
 
-常规页面不展示 YAML 文件路径、选择文件、打开文件编辑、文件重新加载或批量粘贴模型 ID 模块。已有本地模型可通过“迁移已有模型”整理为共享连接，保留原模型 ID 和能力配置；不会迁移云端目录。
+Provider 服务连接与模型接口、Codex 设置使用一致的卡片布局。卡片内显示当前 YAML 配置文件路径，可点击“打开配置文件”使用系统关联的编辑器打开；首次使用时会创建空的默认配置文件。在编辑器中保存后，回到页面点击“重新加载”应用修改。表单编辑期间文件操作不可用，请先保存或取消表单；文件读取失败时仍可打开文件修复并重新加载。
+
+已有本地模型可通过“迁移已有模型”整理为共享连接，保留原模型 ID 和能力配置；不会迁移云端目录。页面不提供选择其他文件或批量粘贴模型 ID 的入口。
 
 ### 存储与兼容性
 
-底层配置仍由原生配置服务保存，默认位置为应用用户数据目录下的 `model-connections/model.yml`。页面采用文件版本检查及原子写入；外部编辑冲突不会被覆盖，无效文件保留上一份有效配置并报错。当前版本不自动监听外部文件变化，页面也不提供文件管理入口。
+底层配置仍由原生配置服务保存，默认位置为应用用户数据目录下的 `model-connections/model.yml`。页面采用文件版本检查及原子写入；外部编辑冲突不会被覆盖，无效文件保留上一份有效配置并报错。当前版本不自动监听外部文件变化，需要点击“重新加载”。
 
 支持 `openai-responses`、`openai-chat-completions`、`anthropic-messages`。模型默认继承连接协议，也可以用 `api_format` / `request_path` 单独覆盖。模型 `id` 是稳定的本地身份，`model_id` 是发给上游的标识；改名称时不要更改 `id`。模型级 `catalog_entry` 保留能力配置。获取模型列表仅返回候选项，不代表推理或工具调用已经验证；列表不可用时仍可手动添加。
 
@@ -30,8 +32,10 @@ Local provider connections share one endpoint, credential, and default API forma
 
 Add or edit a connection, enter its Base URL and API key, and fetch models directly from the current form without saving first. Add each candidate individually, or add a model manually. Model capabilities and maximum context are directly editable; protocol and tool compatibility options remain under less-frequent settings. Save the connection to apply the changes. Discovery does not persist the draft or verify inference/tool execution.
 
-The regular settings UI intentionally omits YAML file controls and batch-paste inputs. Existing standalone local models can be explicitly migrated while preserving their IDs and capabilities. Cloud catalogs are not migrated.
+The provider section uses the same card layout as the model interface and Codex settings. The card shows the active YAML path. “Open configuration file” opens it with the system-associated editor, creating an empty default file on first use. Save external edits and click “Reload” to apply them. File actions are disabled while a form is open; save or cancel the form first. If loading fails, file actions remain available for repair and retry.
 
-The native configuration service still persists `model-connections/model.yml` under the application user-data directory. Revision checks reject stale form saves, writes are atomic, and malformed files retain the last-known-good configuration. External files are not watched automatically. File-management capabilities remain internal rather than being exposed in the regular settings UI.
+Existing standalone local models can be explicitly migrated while preserving their IDs and capabilities. Cloud catalogs are not migrated. File selection and batch-paste inputs are not exposed.
+
+The native configuration service still persists `model-connections/model.yml` under the application user-data directory. Revision checks reject stale form saves, writes are atomic, and malformed files retain the last-known-good configuration. External files are not watched automatically; use “Reload” after saving.
 
 Keys entered in the UI use the existing native secure value store, with machine-local `api_key_ref` values in YAML. Inline `api_key` values are supported by the file format for compatibility but must never be committed or shared. Existing catalog synchronization, runtime-idle handling, and restart confirmation remain in place.

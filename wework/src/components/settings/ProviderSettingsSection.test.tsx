@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { ModelConfigurationSnapshot } from '@/features/model-settings/providerModelConfiguration'
 import { ProviderSettingsSection } from './ProviderSettingsSection'
 import { reloadProviderConfiguration } from '@/features/model-settings/providerModelConfiguration'
-import { replaceProviderModelConfigs } from '@/features/model-settings/providerModelState'
+import {
+  getProviderModelConfigs,
+  replaceProviderModelConfigs,
+} from '@/features/model-settings/providerModelState'
 
 const invoke = vi.hoisted(() => vi.fn())
 vi.mock('@/api/dsh/desktopHost', () => ({
@@ -43,6 +46,7 @@ beforeEach(async () => {
       return snapshot
     }
     if (method === 'modelConfiguration.discover') return discover()
+    if (method === 'modelConfiguration.open') return null
     throw new Error(`Unexpected invocation: ${method}`)
   })
   await reloadProviderConfiguration()
@@ -72,20 +76,124 @@ describe('Provider settings page', () => {
     expect(screen.queryByTestId('provider-settings-error')).not.toBeInTheDocument()
   })
 
-  test('hides file controls, batch input and the extra capabilities gate', async () => {
+  test('groups file settings and providers in a card matching adjacent settings', async () => {
+    render(<ProviderSettingsSection />)
+    const card = await screen.findByTestId('provider-settings-card')
+    expect(card).toHaveClass(
+      'mt-4',
+      'rounded-lg',
+      'border',
+      'border-border',
+      'bg-background',
+      'p-4'
+    )
+    expect(within(card).getByTestId('provider-row-relay')).toBeVisible()
+    expect(within(card).getByTestId('provider-file-path')).toHaveTextContent('/test/model.yml')
+    expect(screen.getByRole('heading', { level: 2, name: 'title' })).toHaveClass(
+      'text-base',
+      'font-semibold'
+    )
+  })
+
+  test('opens the active file through the native host without saving the configuration', async () => {
+    render(<ProviderSettingsSection />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'openFile' }))
+    expect(invoke).toHaveBeenCalledWith('modelConfiguration.open')
+    expect(savedProviders()).toBeUndefined()
+    expect(screen.queryByTestId('provider-settings-error')).not.toBeInTheDocument()
+  })
+
+  test('prevents duplicate file actions until the native operation finishes', async () => {
+    render(<ProviderSettingsSection />)
+    const user = userEvent.setup()
+    let finish!: () => void
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finish = resolve
+        })
+    )
+    await user.click(screen.getByTestId('provider-file-open'))
+    expect(screen.getByTestId('provider-file-open')).toBeDisabled()
+    expect(screen.getByTestId('provider-file-reload')).toBeDisabled()
+    expect(screen.getByTestId('provider-add')).toBeDisabled()
+    await user.click(screen.getByTestId('provider-file-open'))
+    expect(invoke.mock.calls.filter(call => call[0] === 'modelConfiguration.open')).toHaveLength(1)
+    await act(async () => finish())
+    expect(screen.getByTestId('provider-file-open')).toBeEnabled()
+    expect(screen.getByTestId('provider-file-reload')).toBeEnabled()
+  })
+
+  test('shows an open error and allows retry without losing providers', async () => {
+    render(<ProviderSettingsSection />)
+    const user = userEvent.setup()
+    invoke.mockImplementationOnce(async () => {
+      throw new Error('The model file could not be opened in an editor')
+    })
+    await user.click(screen.getByTestId('provider-file-open'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be opened')
+    expect(screen.getByTestId('provider-row-relay')).toBeVisible()
+    await user.click(screen.getByTestId('provider-file-open'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  test('reloads external file changes into both settings and the runtime model catalog', async () => {
+    render(<ProviderSettingsSection />)
+    const user = userEvent.setup()
+    const model = { id: 'file-model', model_id: 'external-model' }
+    snapshot = {
+      ...snapshot,
+      revision: 'external',
+      providers: [{ ...snapshot.providers[0], name: 'From YAML', models: [model] }],
+    }
+    invoke
+      .mockImplementationOnce(async () => snapshot)
+      .mockImplementationOnce(async () => ({
+        revision: 'external',
+        models: [{ provider: snapshot.providers[0], model }],
+      }))
+    await user.click(screen.getByTestId('provider-file-reload'))
+    expect(screen.getByTestId('provider-row-relay')).toHaveTextContent('From YAML')
+    expect(screen.getByTestId('provider-model-file-model')).toHaveTextContent('external-model')
+    expect(getProviderModelConfigs()[0]).toMatchObject({
+      id: 'file-model',
+      modelId: 'external-model',
+    })
+    expect(savedProviders()).toBeUndefined()
+  })
+
+  test('keeps file repair actions available for invalid YAML and recovers after reload', async () => {
+    render(<ProviderSettingsSection />)
+    const user = userEvent.setup()
+    snapshot = { ...snapshot, error: 'model.yml is invalid at line 3' }
+    await user.click(screen.getByTestId('provider-file-reload'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('invalid at line 3')
+    expect(screen.getByTestId('provider-row-relay')).toBeVisible()
+    expect(screen.getByTestId('provider-add')).toBeDisabled()
+    expect(screen.getByTestId('provider-edit-relay')).toBeDisabled()
+    expect(screen.getByTestId('provider-file-open')).toBeEnabled()
+    await user.click(screen.getByTestId('provider-file-open'))
+    expect(invoke).toHaveBeenCalledWith('modelConfiguration.open')
+    snapshot = { ...snapshot, error: undefined }
+    await user.click(screen.getByTestId('provider-file-reload'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByTestId('provider-edit-relay')).toBeEnabled()
+  })
+
+  test('disables file operations during form edits while still hiding batch and file selection controls', async () => {
     await openEditor()
+    expect(screen.getByTestId('provider-file-open')).toBeDisabled()
+    expect(screen.getByTestId('provider-file-reload')).toBeDisabled()
     for (const id of [
-      'provider-file-path',
       'provider-file-choose',
-      'provider-file-open',
-      'provider-file-reload',
       'provider-batch-models',
       'provider-append-models',
       'provider-add-selected',
     ]) {
       expect(screen.queryByTestId(id)).not.toBeInTheDocument()
     }
-    expect(screen.queryByText('/test/model.yml')).not.toBeInTheDocument()
+    expect(screen.getByTestId('provider-file-path')).toHaveTextContent('/test/model.yml')
   })
 
   test('adds models individually without re-entering the stored key', async () => {
