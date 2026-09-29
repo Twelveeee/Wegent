@@ -457,7 +457,7 @@ mod tests {
             forward(child, &child_wire, 10),
             forward(first, &first_wire, 3)
         );
-        let mut notifications = vec![receiver.try_recv().unwrap(), receiver.try_recv().unwrap()];
+        let mut notifications = [receiver.try_recv().unwrap(), receiver.try_recv().unwrap()];
         notifications
             .sort_by_key(|event| event["params"]["item"]["id"].as_str().unwrap().to_owned());
         assert_eq!(notifications[0]["params"]["threadId"], "child");
