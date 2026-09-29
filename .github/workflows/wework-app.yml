@@ -143,7 +143,7 @@ jobs:
           ].join('\n'))
           NODE
           cd wework/electron/release-installer
-          shasum -a 256 *.dmg > SHA256SUMS.txt
+          shasum -a 256 ./*.dmg > SHA256SUMS.txt
 
       - name: Upload test installer
         uses: actions/upload-artifact@v4
