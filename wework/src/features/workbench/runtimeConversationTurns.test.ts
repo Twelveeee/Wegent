@@ -8,6 +8,8 @@ import {
   reduceRuntimeConversationTurns,
 } from './runtimeConversationTurns'
 import type { ProcessingBlock, RuntimeConversationTurn, WorkbenchMessage } from '@/types/workbench'
+import { createRuntimeTaskStreamHandlers } from './runtimePaneMessages'
+import { createResponseApiStreamState, emitResponseApiEvent } from '@/stream/responseApiStream'
 
 function userMessage(id: string, content: string): WorkbenchMessage {
   return {
@@ -35,6 +37,79 @@ function requestBlock(id: string, turnId: string): ProcessingBlock {
 }
 
 describe('runtimeConversationTurns', () => {
+  test.each(['done', 'error'] as const)(
+    'preserves one image-only %s block through duplicate events and empty completion',
+    status => {
+      let turns: RuntimeConversationTurn[] = []
+      const address = { deviceId: 'device', taskId: 'task', subtaskId: 'turn-image' }
+      const handlers = createRuntimeTaskStreamHandlers(address, {
+        onMessageAction: action => {
+          turns = reduceRuntimeConversationTurns(turns, action)
+        },
+      })
+      const state = createResponseApiStreamState()
+      const renderPayload =
+        status === 'done'
+          ? {
+              kind: 'image_generation',
+              deliveryStatus: 'completed',
+              mimeType: 'image/png',
+              source: {
+                type: 'workspace_file',
+                deviceId: 'device',
+                workspacePath: '/workspace',
+                path: 'outputs/generated-images/image.png',
+              },
+            }
+          : {
+              kind: 'image_generation',
+              deliveryStatus: 'failed',
+              error: 'Disk full',
+            }
+      const data = {
+        block_id: 'ig-1',
+        updates: { status, render_payload: renderPayload },
+        block: {
+          id: 'ig-1',
+          type: 'tool',
+          tool_name: 'image_generation',
+          status,
+          render_payload: renderPayload,
+        },
+      }
+      // The file can be delivered before the turn/start acknowledgement.
+      emitResponseApiEvent(handlers, 'response.block.updated', { ...address, data }, state)
+      emitResponseApiEvent(handlers, 'response.created', { ...address, data: {} }, state)
+      emitResponseApiEvent(handlers, 'response.block.updated', { ...address, data }, state)
+      emitResponseApiEvent(
+        handlers,
+        'response.output_text.done',
+        {
+          ...address,
+          data: { item_id: 'empty-final', text: '' },
+        },
+        state
+      )
+      emitResponseApiEvent(
+        handlers,
+        'response.completed',
+        { ...address, data: { response: { status: 'completed' } } },
+        state
+      )
+      const restored = projectRuntimeConversationTurns(JSON.parse(JSON.stringify(turns))).filter(
+        message => message.role === 'assistant'
+      )
+      const images = restored
+        .flatMap(message => message.blocks ?? [])
+        .filter(block => block.type === 'tool' && block.toolName === 'image_generation')
+      expect(restored).toHaveLength(1)
+      expect(restored[0].content).toBe('')
+      expect(images).toHaveLength(1)
+      expect(images[0]).toMatchObject({ id: 'ig-1', status, renderPayload })
+      expect(JSON.stringify(restored)).not.toContain('imageBase64')
+    }
+  )
+
   test('projects stable turn start and completion timestamps through streaming and transcript restore', () => {
     vi.useFakeTimers()
     try {

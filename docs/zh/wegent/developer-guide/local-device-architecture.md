@@ -102,6 +102,12 @@ Wework 的本地可用状态以真实 Codex app-server 完成 `initialize` 为�
 
 Electron 启动主窗口时必须保持主窗口隐藏，并由独立的 startup splash 窗口持续展示启动动画。`wework/electron/src/shell/index.html` 只承载 Core DSH 启动宿主和失败诊断，不得模拟工作台布局、任务列表、输入框或其他骨架屏。Renderer 通过 `renderer.startupReady` 报告首个可操作工作台后，Electron 才显示主窗口并关闭 startup splash；启动失败时继续由 startup splash 提供重试和恢复操作。这样启动期间始终只有一条可见反馈路径，不会由未就绪的主窗口覆盖动画或在动画与真实界面之间闪现占位内容。
 
+### 生成图片的本地交付
+
+当已有本地模型代理收到 Responses 流中的已完成 `image_generation_call` 时，executor 校验并解码图片，将其原子保存到任务工作区的 `outputs/generated-images/`，再通过现有图片附件事件交付。发给 Codex 的正常模型响应保持不变；界面事件只携带文件引用和元数据，不携带图片 Base64，也不扫描 Codex 会话 JSONL。
+
+图片归属在请求进入代理时由执行注册和请求中的 thread/turn 元数据确定，不能按“最近回合”猜测。子代理图片保留在子线程中，取消或被替换的执行不能把图片交给后续执行。任务私有附件目录中的 `generated-images/index.json` 保存去重后的交付记录，历史读取按源 thread/turn 合并，因此仅图片回复和重新打开会话仍能显示附件。图片解码、保存、索引写入或附件读取失败必须展示明确错误，不能以空回复表示成功。
+
 ### 运行时任务与目标状态
 
 运行时任务的 `running` 字段只表示当前是否存在正在执行的模型回合。回合完成、失败或取消后，executor 必须把该字段收敛为 `false`，供 Wework 决定是否显示停止按钮、运行中图标，以及新消息能否直接发送。

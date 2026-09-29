@@ -81,6 +81,8 @@
     "image_generation_done": "图片已生成",
     "image_generation_error": "图片生成失败",
     "image_generation_alt": "生成的图片",
+    "image_generation_delivery_failed": "图片交付失败，未能保存为可访问的附件。",
+    "image_generation_read_failed": "无法读取生成的图片，请检查文件是否仍存在且设备可访问。",
     "edit_action": "编辑文件",
     "create_action": "创建文件",
     "other_action": "调用工具",

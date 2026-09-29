@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Attachment } from "@wegent/chat-core/runtime";
 import type { ProcessingBlock } from "@wegent/chat-core/runtime-conversation";
+import { useConversationTranslation } from "./ConversationTranslation";
 import {
   AttachmentImageView,
   type AttachmentImageServices,
@@ -16,6 +17,7 @@ interface GeneratedImageArtifact {
   height?: number;
   src?: string;
   workspaceFile?: Attachment["workspace_file"];
+  error?: string;
 }
 
 const GENERATED_IMAGE_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
@@ -73,7 +75,9 @@ export function getGeneratedImages(
   blocks: ProcessingBlock[],
   fallbackAlt: string,
 ): GeneratedImageArtifact[] {
-  return blocks.flatMap((block): GeneratedImageArtifact[] => {
+  return [
+    ...new Map(blocks.map((block) => [block.id, block])).values(),
+  ].flatMap((block): GeneratedImageArtifact[] => {
     if (block.type !== "tool" || block.toolName !== "image_generation")
       return [];
     const payload = block.renderPayload;
@@ -89,6 +93,20 @@ export function getGeneratedImages(
       typeof revisedPrompt === "string" && revisedPrompt.trim()
         ? revisedPrompt
         : fallbackAlt;
+    if (Reflect.get(payload, "deliveryStatus") === "failed") {
+      const error = Reflect.get(payload, "error");
+      return [
+        {
+          id: block.id,
+          alt,
+          mimeType: "image/png",
+          fileExtension: ".png",
+          size: 0,
+          error:
+            typeof error === "string" && error.trim() ? error : fallbackAlt,
+        },
+      ];
+    }
     if (
       typeof source === "object" &&
       source !== null &&
@@ -170,9 +188,14 @@ export function GeneratedImageGallery({
   images: GeneratedImageArtifact[];
   services: AttachmentImageServices<Attachment>;
 }) {
-  const attachments = useMemo(
-    () => images.map(generatedImageAttachment),
+  const { t } = useConversationTranslation();
+  const successfulImages = useMemo(
+    () => images.filter((image) => !image.error),
     [images],
+  );
+  const attachments = useMemo(
+    () => successfulImages.map(generatedImageAttachment),
+    [successfulImages],
   );
 
   return (
@@ -180,14 +203,29 @@ export function GeneratedImageGallery({
       className="mb-3 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
       data-testid="generated-image-gallery"
     >
-      {images.map((image, index) => (
-        <GeneratedImagePreview
-          services={services}
-          key={image.id}
-          index={index}
-          galleryAttachments={attachments}
-        />
-      ))}
+      {images.map((image) =>
+        image.error ? (
+          <div
+            key={image.id}
+            role="alert"
+            data-testid="generated-image-error"
+            className="rounded-lg border border-border bg-surface p-4 text-sm text-text-muted"
+          >
+            <p>{t("tool_activity.image_generation_delivery_failed")}</p>
+            <p className="mt-2 break-words">{image.error}</p>
+          </div>
+        ) : (
+          <GeneratedImagePreview
+            services={services}
+            key={image.id}
+            index={successfulImages.findIndex(
+              (candidate) => candidate.id === image.id,
+            )}
+            galleryAttachments={attachments}
+            errorLabel={t("tool_activity.image_generation_read_failed")}
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -196,10 +234,12 @@ function GeneratedImagePreview({
   services,
   index,
   galleryAttachments,
+  errorLabel,
 }: {
   index: number;
   galleryAttachments: Attachment[];
   services: AttachmentImageServices<Attachment>;
+  errorLabel: string;
 }) {
   const attachment = galleryAttachments[index];
 
@@ -214,6 +254,7 @@ function GeneratedImagePreview({
       imageTestId="generated-image"
       loadingTestId="generated-image-loading"
       errorTestId="generated-image-error"
+      errorLabel={errorLabel}
       imageClassName="h-auto w-full rounded-lg border border-border bg-surface object-contain"
       placeholderClassName="flex min-h-40 w-full items-center justify-center rounded-lg border border-border bg-surface text-text-muted"
       buttonClassName="block w-full cursor-zoom-in p-0 text-left"

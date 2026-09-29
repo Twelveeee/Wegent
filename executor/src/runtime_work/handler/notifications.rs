@@ -109,15 +109,19 @@ impl RuntimeWorkRpcHandler {
             .map(|link| link.workspace_path)
             .unwrap_or_default();
         let completed_at = timestamp_ms_field(&turn, "completedAt").unwrap_or_else(now_ms);
-        let messages = transcript_messages(
-            &json!({"cwd": workspace_path, "turns": [turn]}),
-            &self.device_id,
-        )
-        .into_iter()
-        .filter(|message| {
-            string_field(message, "role").is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
-        })
-        .collect::<Vec<_>>();
+        let mut thread = json!({"id": thread_id, "cwd": workspace_path, "turns": [turn]});
+        if let Err(error) =
+            crate::attachments::generated_images::merge_thread_images(local_task_id, &mut thread)
+        {
+            log_executor_event("generated image history merge failed", &[("error", error)]);
+        }
+        let messages = transcript_messages(&thread, &self.device_id)
+            .into_iter()
+            .filter(|message| {
+                string_field(message, "role")
+                    .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
+            })
+            .collect::<Vec<_>>();
         if !messages.is_empty() {
             self.store.update_task(local_task_id, |link| {
                 append_completed_transcript_messages(
@@ -365,7 +369,11 @@ impl RuntimeWorkRpcHandler {
         self.route_codex_notification_inner(message, None);
     }
 
-    fn route_codex_notification_inner(&self, message: Value, replaying_route: Option<(&str, u64)>) {
+    fn route_codex_notification_inner(
+        &self,
+        mut message: Value,
+        replaying_route: Option<(&str, u64)>,
+    ) {
         let thread_id =
             codex_notification_thread_id(&message).or_else(|| self.unscoped_route_thread_id());
         let Some(thread_id) = thread_id else {
@@ -511,6 +519,7 @@ impl RuntimeWorkRpcHandler {
         drop(routing);
 
         if !skip_active_notification {
+            crate::attachments::generated_images::enrich_notification(&local_task_id, &mut message);
             let mut event_request = route_request;
             if !route_nested && !is_context_compaction_request(&event_request) {
                 if let Some(turn_id) = notification_turn_id {

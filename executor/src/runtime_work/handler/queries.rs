@@ -690,6 +690,8 @@ impl RuntimeWorkRpcHandler {
             self.merge_active_codex_transcript(&local_task_id, &mut thread);
             self.repair_legacy_task_activity_time(&local_task_id, &thread);
         }
+        crate::attachments::generated_images::merge_thread_images(&local_task_id, &mut thread)
+            .map_err(|error| AppIpcError::new("image_delivery_error", error))?;
         let workspace_path = local_link
             .as_ref()
             .map(|link| link.workspace_path.clone())

@@ -893,7 +893,7 @@ describe('MessageList', () => {
             {
               id: 'assistant-workspace-image',
               role: 'assistant',
-              content: 'Generated.',
+              content: '',
               status: 'done',
               createdAt: '2026-09-02T10:00:01Z',
               blocks: [
@@ -946,6 +946,68 @@ describe('MessageList', () => {
     clearImagePreviewCache()
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:generated-workspace-image')
   })
+
+  test.each(['delivery', 'read'] as const)(
+    'shows a visible generated-image %s failure without final text',
+    async failure => {
+      const readWorkspaceFileChunk = vi.fn().mockRejectedValue(new Error('File not found'))
+      render(
+        <WorkspaceFileReaderProvider readWorkspaceFileChunk={readWorkspaceFileChunk}>
+          <MessageList
+            messages={[
+              {
+                id: `assistant-image-${failure}-failure`,
+                role: 'assistant',
+                content: '',
+                status: 'done',
+                createdAt: '2026-09-29T10:00:01Z',
+                blocks: [
+                  {
+                    id: 'failed-image',
+                    subtaskId: '1',
+                    type: 'tool',
+                    toolName: 'image_generation',
+                    status: failure === 'delivery' ? 'error' : 'done',
+                    createdAt: Date.now(),
+                    renderPayload:
+                      failure === 'delivery'
+                        ? {
+                            kind: 'image_generation',
+                            deliveryStatus: 'failed',
+                            error: 'Failed to persist image delivery: disk full',
+                          }
+                        : {
+                            kind: 'image_generation',
+                            deliveryStatus: 'completed',
+                            mimeType: 'image/png',
+                            source: {
+                              type: 'workspace_file',
+                              deviceId: 'device-1',
+                              workspacePath: '/workspace',
+                              path: 'outputs/generated-images/missing-image.png',
+                            },
+                          },
+                  },
+                ],
+              },
+            ]}
+          />
+        </WorkspaceFileReaderProvider>
+      )
+      const error = await screen.findByTestId('generated-image-error')
+      expect(error).toHaveAttribute('role', 'alert')
+      expect(error).toHaveTextContent(
+        failure === 'delivery' ? '图片交付失败' : '无法读取生成的图片'
+      )
+      expect(screen.queryByTestId('generated-image')).not.toBeInTheDocument()
+      if (failure === 'delivery') {
+        expect(error).toHaveTextContent('disk full')
+        expect(readWorkspaceFileChunk).not.toHaveBeenCalled()
+      } else {
+        expect(readWorkspaceFileChunk).toHaveBeenCalled()
+      }
+    }
+  )
 
   test('does not render viewed images as final message artifacts', () => {
     const imageUrl = 'data:image/png;base64,aW1hZ2U='

@@ -509,6 +509,64 @@ fn image_generation_updates_do_not_inline_base64_without_an_artifact() {
     assert!(block["render_payload"].get("imageBase64").is_none());
     assert!(updates.get("render_payload").is_none());
     assert!(updates.get("tool_output").is_none());
+    assert_eq!(block["status"], "error");
+    assert_eq!(block["render_payload"]["deliveryStatus"], "failed");
+}
+
+#[test]
+fn image_only_transcript_and_missing_file_errors_remain_visible() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = workspace.path().join("image.png");
+    image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 0, 255, 255]))
+        .save(&source)
+        .unwrap();
+    let item =
+        json!({"id":"image","type":"imageGeneration","status":"completed","savedPath":source});
+    let thread = json!({"id":"thread", "cwd":workspace.path(), "turns":[{
+        "id":"turn","status":"completed","items":[item.clone(),
+            {"id":"final","type":"agentMessage","text":"","phase":"final"}]
+    }]});
+    let messages = transcript_messages(&thread, "device");
+    let serialized = serde_json::to_string(&messages).unwrap();
+    assert!(serialized.contains("workspace_file"));
+    assert!(!serialized.contains("imageBase64"));
+    std::fs::remove_file(source).unwrap();
+    let block = workbench_block_from_notification(
+        &json!({"item":item}),
+        "turn",
+        "device",
+        workspace.path().to_str().unwrap(),
+        Some("done"),
+    )
+    .unwrap();
+    assert_eq!(
+        block["status"], "error",
+        "done must not overwrite delivery failure"
+    );
+    assert!(block["render_payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("open"));
+}
+
+#[test]
+fn explicit_image_save_failure_survives_projection() {
+    let block = workbench_block_from_notification(
+        &json!({"item":{
+            "id":"image","type":"imageGeneration","status":"failed",
+            "deliveryError":"Failed to save generated image: disk full"
+        }}),
+        "turn",
+        "device",
+        "/missing",
+        Some("done"),
+    )
+    .unwrap();
+    assert_eq!(block["status"], "error");
+    assert!(block["render_payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("disk full"));
 }
 
 #[test]

@@ -13,6 +13,9 @@ mod local_history_tests;
 #[path = "execution_timestamp_tests.rs"]
 mod execution_timestamp_tests;
 
+#[path = "generated_image_tests.rs"]
+mod generated_image_tests;
+
 #[path = "task_lookup_tests.rs"]
 mod task_lookup_tests;
 

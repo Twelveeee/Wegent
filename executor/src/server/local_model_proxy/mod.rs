@@ -12,6 +12,7 @@
 mod anthropic;
 mod chat;
 mod fork;
+pub(crate) mod generated_images;
 mod harness_protocol;
 mod history;
 mod image_budget;
@@ -758,6 +759,7 @@ async fn handle_for_token(
     body: Bytes,
 ) -> Result<Response, HttpError> {
     let request_started_at = Instant::now();
+    let image_delivery = generated_images::capture(&token, &body);
     let forked_from_thread_id = codex_forked_from_thread_id(&headers);
     let (upstream, vision_sidecar, history, model_routing) = {
         let mut registry = registry()
@@ -928,9 +930,11 @@ async fn handle_for_token(
                         Bytes::from(format!("data: {}\n\ndata: [DONE]\n\n", value)),
                     )]);
                     let responses_stream = chat::chat_sse_to_responses(source, context);
-                    let mut response = Response::new(Body::from_stream(
-                        history::record_responses_stream(responses_stream, history),
-                    ));
+                    let mut response =
+                        Response::new(Body::from_stream(history::record_responses_stream(
+                            generated_images::observe_stream(responses_stream, image_delivery),
+                            history,
+                        )));
                     response.headers_mut().insert(
                         header::CONTENT_TYPE,
                         HeaderValue::from_static("text/event-stream"),
@@ -943,9 +947,11 @@ async fn handle_for_token(
                         Bytes::from(format!("data: {}\n\ndata: [DONE]\n\n", chat_value)),
                     )]);
                     let responses_stream = chat::chat_sse_to_responses(source, context);
-                    let mut response = Response::new(Body::from_stream(
-                        history::record_responses_stream(responses_stream, history),
-                    ));
+                    let mut response =
+                        Response::new(Body::from_stream(history::record_responses_stream(
+                            generated_images::observe_stream(responses_stream, image_delivery),
+                            history,
+                        )));
                     response.headers_mut().insert(
                         header::CONTENT_TYPE,
                         HeaderValue::from_static("text/event-stream"),
@@ -961,9 +967,11 @@ async fn handle_for_token(
                         Bytes::from(format!("{}\n\n", event)),
                     )]);
                     let responses_stream = chat::responses_sse_to_responses(source, context);
-                    let mut response = Response::new(Body::from_stream(
-                        history::record_responses_stream(responses_stream, history),
-                    ));
+                    let mut response =
+                        Response::new(Body::from_stream(history::record_responses_stream(
+                            generated_images::observe_stream(responses_stream, image_delivery),
+                            history,
+                        )));
                     response.headers_mut().insert(
                         header::CONTENT_TYPE,
                         HeaderValue::from_static("text/event-stream"),
@@ -976,7 +984,13 @@ async fn handle_for_token(
             "event: response.completed\ndata: {}",
             json!({"type": "response.completed", "response": value})
         ));
-        let mut response = Response::new(Body::from(format!("{event}\n\n")));
+        let source = futures_util::stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(
+            format!("{event}\n\n"),
+        ))]);
+        let mut response = Response::new(Body::from_stream(history::record_responses_stream(
+            generated_images::observe_stream(source, image_delivery),
+            history,
+        )));
         response.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/event-stream"),
@@ -989,33 +1003,22 @@ async fn handle_for_token(
         upstream.api_format.clone(),
         request_started_at,
     );
-    let mut response = match conversion {
+    let responses_stream = match conversion {
         Some(Conversion::Chat(context)) => {
-            let responses_stream = chat::chat_sse_to_responses(response_stream, context);
-            Response::new(Body::from_stream(history::record_responses_stream(
-                responses_stream,
-                history,
-            )))
+            chat::chat_sse_to_responses(response_stream, context).boxed()
         }
         Some(Conversion::Anthropic(context)) => {
-            let responses_stream = anthropic::anthropic_sse_to_responses(response_stream, context);
-            Response::new(Body::from_stream(history::record_responses_stream(
-                responses_stream,
-                history,
-            )))
+            anthropic::anthropic_sse_to_responses(response_stream, context).boxed()
         }
         Some(Conversion::Responses(context)) => {
-            let responses_stream = chat::responses_sse_to_responses(response_stream, context);
-            Response::new(Body::from_stream(history::record_responses_stream(
-                responses_stream,
-                history,
-            )))
+            chat::responses_sse_to_responses(response_stream, context).boxed()
         }
-        None => Response::new(Body::from_stream(history::record_responses_stream(
-            normalize_responses_stream(response_stream, expanded_browser_tools),
-            history,
-        ))),
+        None => normalize_responses_stream(response_stream, expanded_browser_tools).boxed(),
     };
+    let mut response = Response::new(Body::from_stream(history::record_responses_stream(
+        generated_images::observe_stream(responses_stream, image_delivery),
+        history,
+    )));
     *response.status_mut() = status;
     if is_converted {
         response.headers_mut().insert(

@@ -844,9 +844,11 @@ impl CodexNotificationEventMapper {
                 emit_context.request.cwd().unwrap_or_default(),
                 Some("done"),
             );
-            if let (Some(block), Some(parent_tool_use_id)) =
-                (block.as_mut(), self.subagent_parent_block_id(params))
-            {
+            if let (Some(block), Some(parent_tool_use_id)) = (
+                block.as_mut(),
+                self.subagent_parent_block_id(params)
+                    .filter(|_| self.is_subagent_delta(params)),
+            ) {
                 if let Some(object) = block.as_object_mut() {
                     object.insert(
                         "parent_tool_use_id".to_owned(),
@@ -863,6 +865,11 @@ impl CodexNotificationEventMapper {
                 .cloned()
             {
                 if let Some(object) = updates.as_object_mut() {
+                    if render_payload.get("deliveryStatus").and_then(Value::as_str)
+                        == Some("failed")
+                    {
+                        object.insert("status".to_owned(), json!("error"));
+                    }
                     object.insert("render_payload".to_owned(), render_payload);
                 }
             }

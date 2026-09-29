@@ -41,6 +41,7 @@ export interface AttachmentImageViewProps<T extends ImageAttachment> {
   imageTestId: string;
   loadingTestId: string;
   errorTestId: string;
+  errorLabel?: string;
   imageClassName: string;
   placeholderClassName: string;
   buttonClassName?: string;
@@ -88,6 +89,7 @@ export function AttachmentImageView<T extends ImageAttachment>({
   imageTestId,
   loadingTestId,
   errorTestId,
+  errorLabel,
   imageClassName,
   placeholderClassName,
   buttonClassName = "block max-w-full cursor-zoom-in p-0 text-left",
@@ -556,9 +558,14 @@ export function AttachmentImageView<T extends ImageAttachment>({
       className={placeholderClassName}
       style={previewContainerStyle}
       aria-label={attachment.filename}
+      role={hasError && errorLabel ? "alert" : undefined}
     >
       {hasError ? (
-        <FileText className="h-5 w-5" />
+        errorLabel ? (
+          <span className="p-4 text-sm">{errorLabel}</span>
+        ) : (
+          <FileText className="h-5 w-5" />
+        )
       ) : (
         <Loader2 className="h-5 w-5 animate-spin" />
       )}

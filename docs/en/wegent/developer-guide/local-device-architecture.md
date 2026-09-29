@@ -102,6 +102,12 @@ Wework considers the local runtime usable only after the real Codex app-server c
 
 Electron must keep the main window hidden while it starts and use the separate startup splash window as the only visible loading surface. `wework/electron/src/shell/index.html` hosts Core DSH startup and failure diagnostics only; it must not imitate the workbench layout, task list, composer, or any other skeleton UI. Electron shows the main window and closes the startup splash only after the Renderer reports the first actionable workbench through `renderer.startupReady`. Startup failures continue to expose retry and recovery actions through the startup splash. This preserves one visible startup path and prevents an unready main window from covering the animation or flashing placeholder content before the real interface.
 
+### Local Delivery of Generated Images
+
+When the existing local model proxy receives a completed `image_generation_call` in a Responses stream, the executor validates and decodes the image, atomically saves it under the task workspace's `outputs/generated-images/`, and delivers it through existing image attachment events. Normal model responses forwarded to Codex remain unchanged. UI events contain file references and metadata rather than image Base64, and delivery never scans Codex session JSONL files.
+
+The execution registration and request thread/turn metadata establish ownership at proxy ingress; delivery must not guess the most recent turn. Subagent images stay in their source thread, and cancelled or replaced executions cannot deliver into a later execution. A deduplicated `generated-images/index.json` in the task's private attachment directory records deliveries. History reads merge these records by source thread/turn, preserving image-only replies and attachments after reopening a conversation. Decode, save, index-write, and attachment-read failures must surface explicit errors instead of a successful empty reply.
+
 ### Runtime Task and Goal State
 
 The runtime task `running` field represents only whether a model turn is currently executing. After a turn completes, fails, or is cancelled, the executor must settle that field to `false`. Wework uses it to decide whether to render the stop control and running indicator, and whether a new message can be sent directly.

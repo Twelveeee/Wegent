@@ -879,18 +879,26 @@ impl RuntimeWorkRpcHandler {
         request: &ExecutionRequest,
         active_turn: Option<ActiveCodexTurn>,
         event_mapper: &mut CodexNotificationEventMapper,
-        message: Value,
+        mut message: Value,
     ) {
         if !self.is_local_task_execution_accepting_notifications(local_task_id, execution_id) {
             return;
         }
+        crate::attachments::generated_images::enrich_notification(local_task_id, &mut message);
         if self.sync_runtime_task_goal_from_notification(local_task_id, &message) {
             self.journal_active_goal_turn(local_task_id, request, active_turn.as_ref());
         }
         self.persist_completed_codex_turn_from_notification(local_task_id, &message);
 
+        let image_root_turn_id = message
+            .pointer("/params/item/imageRootTurnId")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let owning_turn_id = image_root_turn_id
+            .clone()
+            .or_else(|| codex_notification_turn_id(&message));
         if let (Some(active_turn), Some(notification_turn_id)) =
-            (active_turn.as_ref(), codex_notification_turn_id(&message))
+            (active_turn.as_ref(), owning_turn_id)
         {
             if notification_turn_id != active_turn.turn_id {
                 if codex_stream_debug_enabled() {
@@ -948,9 +956,29 @@ impl RuntimeWorkRpcHandler {
             return;
         }
         let mut event_request = request.clone();
+        // The local proxy can finish before turn/start's reply is processed.
+        // Its verified HTTP-request identity is authoritative even in that race.
+        if let Some(turn_id) = image_root_turn_id {
+            event_request.subtask_id = turn_id;
+            if let Some(thread_id) = message
+                .pointer("/params/item/imageRootThreadId")
+                .and_then(Value::as_str)
+            {
+                event_mapper.observe_root_thread_id(thread_id);
+            }
+        }
         if let Some(active_turn) = active_turn {
             event_mapper.observe_root_thread_id(&active_turn.thread_id);
-            self.record_active_codex_transcript_item(local_task_id, &active_turn.turn_id, &message);
+            if codex_notification_thread_id(&message)
+                .as_deref()
+                .map_or(true, |thread_id| thread_id == active_turn.thread_id)
+            {
+                self.record_active_codex_transcript_item(
+                    local_task_id,
+                    &active_turn.turn_id,
+                    &message,
+                );
+            }
             event_request.subtask_id = active_turn.turn_id;
         }
         event_mapper.map(

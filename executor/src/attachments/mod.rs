@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+pub(crate) mod generated_images;
 mod handler;
 mod multimodal_prompt;
 mod paths;

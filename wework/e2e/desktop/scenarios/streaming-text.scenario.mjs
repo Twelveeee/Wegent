@@ -53,6 +53,8 @@ const GENERATED_IMAGE_PROMPT = 'WEWORK_DESKTOP_E2E_GENERATED_IMAGE'
 const GENERATED_IMAGE_COMPLETION = 'WEWORK_DESKTOP_E2E_GENERATED_IMAGE_COMPLETE'
 const GENERATED_IMAGE_CALL_ID = 'wework-generated-image'
 const GENERATED_IMAGE_REVISED_PROMPT = 'A small generated image used by the desktop regression test'
+const HOSTED_IMAGE_PROMPT = 'WEWORK_DESKTOP_E2E_HOSTED_RESPONSE_IMAGE'
+const INVALID_HOSTED_IMAGE_PROMPT = 'WEWORK_DESKTOP_E2E_INVALID_HOSTED_RESPONSE_IMAGE'
 const WINDOWS_LINK_PROMPT = 'WEWORK_DESKTOP_E2E_WINDOWS_DRIVE_LINK'
 const WINDOWS_LINK_LABEL = 'wegent'
 const WINDOWS_LINK_COMPLETION = '[wegent](C:/projects/example-app/wegent)'
@@ -1886,6 +1888,33 @@ export function createDesktopScenario({
         return true
       }
 
+      // Hosted Responses images bypass the standalone image tool/API tested below.
+      if (
+        latestModelInputText(body).includes(HOSTED_IMAGE_PROMPT) ||
+        latestModelInputText(body).includes(INVALID_HOSTED_IMAGE_PROMPT)
+      ) {
+        const invalid = latestModelInputText(body).includes(INVALID_HOSTED_IMAGE_PROMPT)
+        assert.ok(body.client_metadata?.thread_id, 'Hosted image request has no thread identity')
+        assert.ok(body.client_metadata?.turn_id, 'Hosted image request has no turn identity')
+        const item = {
+          id: invalid ? 'hosted-image-invalid' : 'hosted-image-complete',
+          type: 'image_generation_call',
+          status: 'completed',
+          result: invalid ? 'not-valid-base64' : ATTACHMENT_BASE64,
+        }
+        const terminal = responseCompleted(responseId)
+        terminal.response.output = [item]
+        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' })
+        response.end(
+          sse([
+            responseCreated(responseId),
+            { type: 'response.output_item.done', output_index: 0, item },
+            terminal,
+          ])
+        )
+        return true
+      }
+
       if (requestContainsGeneratedImagePrompt(body)) {
         assert.equal(
           generatedImageStage,
@@ -2059,6 +2088,60 @@ export function createDesktopScenario({
         'The generated image tool exposed an empty generic tool result'
       )
       await capture(control, 'streaming-text-00-generated-image.png')
+
+      // One hosted image, no final text, duplicate done/completed payloads.
+      await openNewChatWithE2EModel(control, uiTimeoutMs)
+      await control.command('fill', COMPOSER_SELECTOR, { value: HOSTED_IMAGE_PROMPT })
+      await control.command('press', COMPOSER_SELECTOR, { key: 'Enter' })
+      await control.command('waitFor', '[data-testid="generated-image"]', {
+        timeoutMs: uiTimeoutMs,
+      })
+      assert.equal(
+        Number(await control.command('getElementCount', '[data-testid="generated-image"]')),
+        1
+      )
+      assert.match(
+        await control.command('getAttribute', '[data-testid="generated-image"]', { value: 'src' }),
+        /^blob:/
+      )
+      await control.command('click', '[data-testid="generated-image-preview-button"]')
+      await control.command('waitFor', '[data-testid="attachment-image-lightbox-image"]', {
+        timeoutMs: uiTimeoutMs,
+      })
+      await control.command('waitFor', '[data-testid="attachment-image-download"]', {
+        timeoutMs: uiTimeoutMs,
+      })
+      await control.command('press', 'body', { key: 'Escape' })
+      const readyBeforeHostedReload = control.readyCount
+      await control.command('reloadMainWindow', 'body')
+      await Promise.race([
+        control.awaitReadyAfter(readyBeforeHostedReload),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Hosted image reload did not reconnect')), uiTimeoutMs)
+        ),
+      ])
+      await control.command('waitFor', '[data-testid="generated-image"]', {
+        timeoutMs: uiTimeoutMs,
+      })
+      assert.equal(
+        Number(await control.command('getElementCount', '[data-testid="generated-image"]')),
+        1,
+        'The hosted image disappeared or duplicated after reload'
+      )
+      await capture(control, 'streaming-text-00-hosted-image-restored.png')
+
+      await openNewChatWithE2EModel(control, uiTimeoutMs)
+      await control.command('fill', COMPOSER_SELECTOR, { value: INVALID_HOSTED_IMAGE_PROMPT })
+      await control.command('press', COMPOSER_SELECTOR, { key: 'Enter' })
+      await control.command('waitFor', '[data-testid="generated-image-error"]', {
+        text: '图片交付失败',
+        timeoutMs: uiTimeoutMs,
+      })
+      assert.equal(
+        Number(await control.command('getElementCount', '[data-testid="generated-image"]')),
+        0
+      )
+      await capture(control, 'streaming-text-00-hosted-image-error.png')
       if (process.env.WEWORK_E2E_GENERATED_IMAGE_ONLY === 'true') {
         active = false
         return

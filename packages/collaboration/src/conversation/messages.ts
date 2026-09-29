@@ -301,6 +301,10 @@ export const conversationMessages: Record<
     "conversation.tool_activity.file_done": "读取 {{name}}",
     "conversation.tool_activity.file_fallback": "文件",
     "conversation.tool_activity.image_generation_alt": "生成的图片",
+    "conversation.tool_activity.image_generation_delivery_failed":
+      "图片交付失败，未能保存为可访问的附件。",
+    "conversation.tool_activity.image_generation_read_failed":
+      "无法读取生成的图片，请检查文件是否仍存在且设备可访问。",
     "conversation.tool_activity.image_generation_done": "图片已生成",
     "conversation.tool_activity.image_generation_error": "图片生成失败",
     "conversation.tool_activity.image_generation_running": "正在生成图片",
@@ -686,6 +690,10 @@ export const conversationMessages: Record<
     "conversation.tool_activity.file_done": "Read {{name}}",
     "conversation.tool_activity.file_fallback": "file",
     "conversation.tool_activity.image_generation_alt": "Generated image",
+    "conversation.tool_activity.image_generation_delivery_failed":
+      "Image delivery failed. An accessible attachment could not be saved.",
+    "conversation.tool_activity.image_generation_read_failed":
+      "Unable to read the generated image. Check that the file still exists and the device is accessible.",
     "conversation.tool_activity.image_generation_done": "Image generated",
     "conversation.tool_activity.image_generation_error":
       "Image generation failed",

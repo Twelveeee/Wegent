@@ -85,6 +85,8 @@
     "image_generation_done": "Image generated",
     "image_generation_error": "Image generation failed",
     "image_generation_alt": "Generated image",
+    "image_generation_delivery_failed": "Image delivery failed. An accessible attachment could not be saved.",
+    "image_generation_read_failed": "Unable to read the generated image. Check that the file still exists and the device is accessible.",
     "edit_action": "Edit file",
     "create_action": "Create file",
     "other_action": "Call tool",

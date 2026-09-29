@@ -553,7 +553,12 @@ pub(crate) fn workbench_block_from_notification(
         now_ms(),
         TranscriptBuildOptions::truncated(),
     )?;
-    if let Some(status) = status {
+    if let Some(status) = status.filter(|_| {
+        block
+            .pointer("/render_payload/deliveryStatus")
+            .and_then(Value::as_str)
+            != Some("failed")
+    }) {
         if let Some(object) = block.as_object_mut() {
             object.insert("status".to_owned(), Value::String(status.to_owned()));
         }

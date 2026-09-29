@@ -1813,6 +1813,17 @@ async fn run_codex_app_server_turn_on_shared_client(
         }
         state.set_root_thread_id(thread_id.clone());
         bind_local_proxy_thread(&launch_config, &thread_id)?;
+        // Keep delivery scoped to this execution. HTTP requests capture this target
+        // and their own turn metadata before any upstream response can arrive.
+        let _image_delivery = launch_config.local_proxy_registration.as_ref()
+            .zip(notifications.as_ref())
+            .map(|(registration, sender)| local_model_proxy::generated_images::register(
+                &registration.0,
+                &request.task_id,
+                request.cwd().unwrap_or_default(),
+                &thread_id,
+                sender,
+            ));
         let mut notification_rx = match early_notification_rx {
             Some(notification_rx) => notification_rx,
             None => {
