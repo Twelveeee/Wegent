@@ -1105,7 +1105,19 @@ describe('DesktopSidebar', () => {
     expect(screen.getByTestId('runtime-local-task-row-running-task')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-local-task-row-waiting-task')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-local-task-row-running-waiting-task')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-local-task-waiting-waiting-task')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-local-task-waiting-waiting-task')).toHaveAttribute(
+      'aria-label',
+      '等待回复'
+    )
+    expect(screen.getByTestId('runtime-local-task-waiting-running-waiting-task')).toHaveAttribute(
+      'aria-label',
+      '等待回复'
+    )
+    expect(screen.getByTestId('runtime-local-task-waiting-waiting-task')).toHaveClass(
+      'h-6',
+      'w-6',
+      'rounded-lg'
+    )
     expect(screen.queryByTestId('runtime-local-task-row-idle-task')).not.toBeInTheDocument()
     expect(screen.getByTestId('runtime-local-task-row-unread-task')).toHaveClass(
       'min-h-[48px]',
@@ -1710,7 +1722,10 @@ describe('DesktopSidebar', () => {
               workspaceKind: 'chat' as const,
               title: 'Active task',
               runtime: 'codex' as const,
+              running: true,
               status,
+              interactionStatus:
+                status === 'waiting_for_user_input' ? ('waitingForUserInput' as const) : null,
             },
             {
               taskId: 'other-task',
@@ -1764,10 +1779,32 @@ describe('DesktopSidebar', () => {
 
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(scrollContainer.scrollTop).toBe(180)
+    expect(screen.getByTestId('runtime-local-task-waiting-active-task')).toBeInTheDocument()
+    expect(screen.queryByTestId('runtime-local-task-running-active-task')).not.toBeInTheDocument()
+
+    const resumedProps = createSidebarProps({
+      projects: [],
+      runtimeWork: runtimeWork('running'),
+      currentRuntimeTask: { ...currentRuntimeTask },
+    })
+    act(() => lifecycleStore.syncRuntimeWork(resumedProps.runtimeWork))
+    view.rerender(
+      <RuntimeTaskLifecycleProvider store={lifecycleStore}>
+        <DesktopSidebar {...resumedProps} />
+      </RuntimeTaskLifecycleProvider>
+    )
+
+    expect(screen.queryByTestId('runtime-local-task-waiting-active-task')).not.toBeInTheDocument()
+    expect(screen.getByTestId('runtime-local-task-running-active-task')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-local-task-hover-actions-active-task')).toHaveClass(
+      'right-0'
+    )
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(scrollContainer.scrollTop).toBe(180)
 
     const switchedProps = createSidebarProps({
       projects: [],
-      runtimeWork: refreshedProps.runtimeWork,
+      runtimeWork: resumedProps.runtimeWork,
       currentRuntimeTask: {
         deviceId: 'local-device',
         taskId: 'other-task',
@@ -3604,7 +3641,9 @@ describe('DesktopSidebar', () => {
   })
 
   test('shows running status on running runtime tasks only', async () => {
+    const onOpenRuntimeTask = vi.fn()
     renderSidebar({
+      onOpenRuntimeTask,
       runtimeWork: {
         projects: [
           {
@@ -3683,8 +3722,36 @@ describe('DesktopSidebar', () => {
       screen.queryByTestId('runtime-local-task-goal-dot-codex-running-without-goal')
     ).not.toBeInTheDocument()
     expect(screen.queryByTestId('runtime-local-task-running-codex-idle')).not.toBeInTheDocument()
-    expect(screen.getByTestId('runtime-local-task-waiting-codex-waiting')).toBeInTheDocument()
+    const waitingStatus = screen.getByTestId('runtime-local-task-waiting-codex-waiting')
+    expect(waitingStatus).not.toHaveTextContent('等待回复')
+    expect(waitingStatus).toHaveAttribute('role', 'status')
+    expect(waitingStatus).toHaveAttribute('aria-label', '等待回复')
+    expect(waitingStatus).toHaveClass(
+      'h-6',
+      'w-6',
+      'rounded-lg',
+      'bg-[rgb(var(--color-sidebar-attention-bg))]',
+      'text-[rgb(var(--color-sidebar-attention))]'
+    )
+    expect(waitingStatus.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(waitingStatus.querySelector('svg')).toHaveClass('h-4', 'w-4')
+    expect(waitingStatus.parentElement).toHaveClass('visible')
+    expect(waitingStatus.parentElement?.parentElement).toHaveClass('w-[30px]')
+    expect(screen.getByTestId('runtime-local-task-hover-actions-codex-waiting')).toHaveClass(
+      'right-full',
+      'mr-1'
+    )
+    expect(screen.getByTestId('runtime-local-task-hover-actions-codex-running')).toHaveClass(
+      'right-0'
+    )
+    expect(screen.queryByTestId('runtime-local-task-waiting-codex-idle')).not.toBeInTheDocument()
     expect(screen.queryByTestId('runtime-local-task-running-codex-waiting')).not.toBeInTheDocument()
+
+    await userEvent.click(waitingStatus)
+    expect(onOpenRuntimeTask).toHaveBeenCalledTimes(1)
+    expect(onOpenRuntimeTask).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: 'local-device', taskId: 'codex-waiting' })
+    )
   })
 
   test('shows a queued active Goal recovery as running while preserving queue actions', async () => {
