@@ -2518,6 +2518,7 @@ describe('MessageList', () => {
   const originalRevokeObjectUrl = URL.revokeObjectURL
 
   afterEach(() => {
+    vi.useRealTimers()
     clearImagePreviewCache()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
@@ -5010,7 +5011,7 @@ describe('MessageList', () => {
 
   test('shows user message hover actions with time, copy label, and resettable success icon', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-25T16:00:00.000+08:00'))
+    vi.setSystemTime(new Date(2026, 4, 25, 16))
 
     render(
       <MessageList
@@ -5020,7 +5021,7 @@ describe('MessageList', () => {
             role: 'user',
             content: '对 bind_shell=openclaw 直接跳过',
             status: 'done',
-            createdAt: '2026-05-25T15:08:00.000+08:00',
+            createdAt: new Date(2026, 4, 25, 15, 8).toISOString(),
           },
         ]}
       />
@@ -5429,7 +5430,7 @@ describe('MessageList', () => {
   test('shows only clock time for messages created today', () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(new Date('2026-05-25T18:50:00.000+08:00'))
+      vi.setSystemTime(new Date(2026, 4, 25, 18, 50))
 
       render(
         <MessageList
@@ -5439,7 +5440,7 @@ describe('MessageList', () => {
               role: 'user',
               content: '今天的消息',
               status: 'done',
-              createdAt: '2026-05-25T18:49:00.000+08:00',
+              createdAt: new Date(2026, 4, 25, 18, 49).toISOString(),
             },
           ]}
         />
@@ -5455,7 +5456,7 @@ describe('MessageList', () => {
   test('shows weekday and clock time for messages created within seven days', () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(new Date('2026-06-29T18:50:00.000+08:00'))
+      vi.setSystemTime(new Date(2026, 5, 29, 18, 50))
 
       render(
         <MessageList
@@ -5465,7 +5466,7 @@ describe('MessageList', () => {
               role: 'user',
               content: '昨天的消息',
               status: 'done',
-              createdAt: '2026-06-28T15:27:00.000+08:00',
+              createdAt: new Date(2026, 5, 28, 15, 27).toISOString(),
             },
           ]}
         />
@@ -5480,7 +5481,7 @@ describe('MessageList', () => {
   test('shows date and clock time for messages not created today in the current year', () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(new Date('2026-05-25T18:50:00.000+08:00'))
+      vi.setSystemTime(new Date(2026, 4, 25, 18, 50))
 
       render(
         <MessageList
@@ -5490,7 +5491,7 @@ describe('MessageList', () => {
               role: 'user',
               content: '昨天的消息',
               status: 'done',
-              createdAt: '2026-06-18T12:04:00.000+08:00',
+              createdAt: new Date(2026, 5, 18, 12, 4).toISOString(),
             },
           ]}
         />
@@ -5505,7 +5506,7 @@ describe('MessageList', () => {
   test('shows year for messages not created this year', () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(new Date('2026-05-25T18:50:00.000+08:00'))
+      vi.setSystemTime(new Date(2026, 4, 25, 18, 50))
 
       render(
         <MessageList
@@ -5515,7 +5516,7 @@ describe('MessageList', () => {
               role: 'user',
               content: '去年的消息',
               status: 'done',
-              createdAt: '2025-06-18T12:04:00.000+08:00',
+              createdAt: new Date(2025, 5, 18, 12, 4).toISOString(),
             },
           ]}
         />
@@ -5529,7 +5530,7 @@ describe('MessageList', () => {
 
   test('shows assistant message hover actions with time and icon-hover copy label', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-25T19:00:00.000+08:00'))
+    vi.setSystemTime(new Date(2026, 4, 25, 19))
 
     render(
       <MessageList
@@ -5539,7 +5540,7 @@ describe('MessageList', () => {
             role: 'assistant',
             content: '好的，以下是作文内容。',
             status: 'done',
-            createdAt: '2026-05-25T18:38:00.000+08:00',
+            createdAt: new Date(2026, 4, 25, 18, 38).toISOString(),
           },
         ]}
       />
